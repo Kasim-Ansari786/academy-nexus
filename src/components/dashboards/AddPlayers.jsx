@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 // 1. Import useNavigate for redirection
 import { useNavigate } from "react-router-dom"; 
 import { Button } from "@/components/ui/button";
@@ -29,66 +29,67 @@ import {
 import { toast } from "sonner"; 
 // Assuming you have an API to fetch player details and a new one for coaches
 // NOTE: Ensure your API file defines GetCoachDetailslist and AddNewPlayerDetails
-import { AddNewPlayerDetails, GetCoachDetailslist } from "../../../api"; 
+// NOTE: GetCoachDetailslist is no longer used, but kept in import for consistency with API structure.
+import { AddNewPlayerDetails } from "../../../api"; 
 
-// --- START: Mock Data & Initial State ---
+// --- START: Initial State ---
 
 const initialFormData = {
   // Personal Details
   name: "", father_name: "", mother_name: "", gender: "", date_of_birth: "", age: "",
   blood_group: "", phone_no: "", email_id: "", address: "",
-  // Guardian Details
+  // Guardian & Emergency Details
   emergency_contact_number: "", guardian_contact_number: "", guardian_email_id: "",
-  // Academy Details
-  center_name: "", coach_name: "", category: "", 
-  // Status and Medical
-  active: false, status: "Pending", medical_condition: "",
+  // Medical is now here
+  medical_condition: "",
+  
   // File Upload Paths (these hold File objects)
   aadhar_upload_path: null, birth_certificate_path: null, profile_photo_path: null,
 };
 
 const bloodGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
-const CATEGORIES = ["Football", "Cricket", "Swimming", "Athletics", "Basketball", "Tennis", "Others"];
+// CATEGORIES constant removed as it's no longer used.
 
-// --- END: Mock Data & Initial State ---
+// --- END: Initial State ---
+
+/**
+ * Calculates the age in years from a date string (YYYY-MM-DD format).
+ * @param {string} dateString - The date of birth in YYYY-MM-DD format.
+ * @returns {string} The calculated age as a string, or an empty string if the date is invalid.
+ */
+const calculateAge = (dateString) => {
+    if (!dateString) return "";
+
+    const birthDate = new Date(dateString);
+    const today = new Date();
+
+    // Check for invalid date
+    if (isNaN(birthDate)) return ""; 
+
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+
+    // Adjust age if the birthday hasn't occurred yet this year
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+    }
+    
+    // Return age as a string
+    return age > 0 ? String(age) : "";
+};
+
 
 const AddPlayerForm = () => {
   const [formData, setFormData] = useState(initialFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // NEW STATE: To store the list of coaches fetched from the backend
-  // We will store the full coach object for now, or just the names (as before)
-  const [coaches, setCoaches] = useState([]);
-  const [isLoadingCoaches, setIsLoadingCoaches] = useState(false);
+  
+  // State to help reset file inputs after submission
+  const [fileInputKey, setFileInputKey] = useState(Date.now());
   
   // 2. Initialize useNavigate hook
   const navigate = useNavigate();
 
-  // EFFECT: Fetch coach list on component mount
-  useEffect(() => {
-    const loadCoaches = async () => {
-      setIsLoadingCoaches(true);
-      try {
-        // coachList will be: [{ coach_id: 1, coach_name: "John Doe" }, ...]
-        const coachList = await GetCoachDetailslist(); 
-        
-        // FIX: Map using 'coach_name' which matches the SQL column name
-        const coachNames = coachList.map(coach => coach.coach_name);
-        
-        // Set the state to the array of coach names
-        setCoaches(coachNames);
-        
-      } catch (error) {
-        console.error("Failed to fetch coach list:", error);
-        toast.error("Could not load coach list. Check server status.", { 
-            duration: 5000, 
-        });
-      } finally {
-        setIsLoadingCoaches(false);
-      }
-    };
-
-    loadCoaches();
-  }, []); 
+  // useEffect for fetching coaches is removed as coach_name is deleted.
 
 
   const handleSignOut = () => {
@@ -120,8 +121,25 @@ const AddPlayerForm = () => {
   };
 
   const handleSelectChange = (id, value) => {
-    setFormData((prev) => ({ ...prev, [id]: value }));
+    setFormData((prev) => {
+        let newState = { ...prev, [id]: value };
+        
+        // AGE CALCULATION LOGIC: If Date of Birth changes, auto-calculate age
+        if (id === "date_of_birth") {
+            const age = calculateAge(value);
+            newState.age = age; // Update age in the form data
+        }
+        
+        return newState;
+    });
   };
+  
+  // Function to fully reset the form and file inputs
+  const resetForm = useCallback(() => {
+      setFormData(initialFormData);
+      // Change the key to force a re-render and reset of file input elements
+      setFileInputKey(Date.now()); 
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -145,10 +163,17 @@ const AddPlayerForm = () => {
         const value = formData[key];
         
         if (value instanceof File) {
-             formDataToSend.append(key, value, value.name); // Include file name
+             // Appends the file to the FormData object
+             formDataToSend.append(key, value, value.name); 
         } 
-        else if (value !== null && value !== undefined) {
-             // Convert boolean state ('active') to string for the backend
+        else if (value !== null && value !== undefined && key !== "age") {
+             // NOTE: 'active' and other removed fields are not present in initialFormData.
+             // We skip appending the 'age' field directly as it's auto-calculated.
+             // If age is needed by the backend, remove 'key !== "age"' condition.
+             formDataToSend.append(key, String(value));
+        }
+        else if (key === "age" && value !== "") {
+             // Append age if it's calculated
              formDataToSend.append(key, String(value));
         }
     });
@@ -165,7 +190,8 @@ const AddPlayerForm = () => {
             }
         );
         
-        setFormData(initialFormData); 
+        // Reset the form and file inputs
+        resetForm(); 
         
         // 3. Navigation after successful submission
         setTimeout(() => {
@@ -191,27 +217,36 @@ const AddPlayerForm = () => {
 
 
   const handleCancel = () => {
-    setFormData(initialFormData);
+    resetForm();
   };
 
-  const renderInputField = (id, label, type = "text", placeholder = "", maxLength = null) => (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        type={type}
-        placeholder={placeholder}
-        value={formData[id] || ""}
-        onChange={handleChange}
-        maxLength={maxLength}
-      />
-    </div>
-  );
+  const renderInputField = (id, label, type = "text", placeholder = "", maxLength = null, disabled = false) => {
+      // Use handleSelectChange for date_of_birth to trigger age calculation
+      const isDateOfBirth = id === "date_of_birth"; 
+      
+      return (
+          <div className="space-y-2">
+            <Label htmlFor={id}>{label}</Label>
+            <Input
+              id={id}
+              type={type}
+              placeholder={placeholder}
+              // Age and date of birth are handled by handleSelectChange
+              value={formData[id] || ""} 
+              onChange={isDateOfBirth ? (e) => handleSelectChange(id, e.target.value) : handleChange} 
+              maxLength={maxLength}
+              disabled={disabled}
+            />
+          </div>
+      );
+  };
 
   const renderFileInput = (id, label) => (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
+      {/* File Input Key: Use the key prop to force reset the input field in the DOM */}
       <Input
+        key={id + fileInputKey} // Unique key ensures re-render on fileInputKey change
         id={id}
         type="file"
         onChange={handleChange}
@@ -222,46 +257,16 @@ const AddPlayerForm = () => {
                    file:bg-primary file:text-primary-foreground
                    hover:file:bg-primary/90"
       />
-      {/* Check if formData[id] exists and is a File object before accessing .name */}
-      {formData[id] && formData[id] instanceof File && (
-        <p className="text-xs text-muted-foreground mt-1 text-center">
-          File ready: {formData[id].name}
+      {/* Display selected file name */}
+      {formData[id] && formData[id] instanceof File ? (
+        <p className="text-xs text-muted-foreground mt-1 text-center font-medium text-green-600">
+          Selected File: {formData[id].name}
+        </p>
+      ) : (
+          <p className="text-xs text-muted-foreground mt-1 text-center">
+          No file selected.
         </p>
       )}
-    </div>
-  );
-  
-  // FIX APPLIED HERE: Filtering out empty strings and null/undefined values
-  const renderCoachSelect = () => (
-    <div className="space-y-2">
-        <Label htmlFor="coach_name">Coach Name</Label>
-        <Select
-            id="coach_name"
-            value={formData.coach_name}
-            onValueChange={(v) => handleSelectChange("coach_name", v)}
-            disabled={isLoadingCoaches} // Disable while loading
-        >
-            <SelectTrigger>
-                <SelectValue placeholder={isLoadingCoaches ? "Loading Coaches..." : "Select Coach"} />
-            </SelectTrigger>
-            <SelectContent>
-                {/* Ensure the list is not empty and filter out invalid values */}
-                {coaches.length > 0 ? (
-                    coaches
-                        .filter(Boolean) 
-                        .map((coachName) => (
-                        // coachName is now a valid string (e.g., "John Doe")
-                        <SelectItem key={coachName} value={coachName}>
-                            {coachName}
-                        </SelectItem>
-                    ))
-                ) : (
-                    <SelectItem value="no_coaches" disabled>
-                        {isLoadingCoaches ? "Loading..." : "No Coaches Found"}
-                    </SelectItem>
-                )}
-            </SelectContent>
-        </Select>
     </div>
   );
 
@@ -275,7 +280,7 @@ const AddPlayerForm = () => {
         <div className="space-y-1">
           <h1 className="text-2xl font-bold mb-2">Add Administration</h1>
           <p className="text-primary-foreground/80">
-            Complete academy management and oversight
+            Complete management and oversight
           </p>
         </div>
         <Button
@@ -301,8 +306,10 @@ const AddPlayerForm = () => {
           </CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {renderInputField("name", "Full Name *", "text", "E.g., Michael Jordan")}
-            {renderInputField("date_of_birth", "Date of Birth *", "date")}
-            {renderInputField("age", "Age", "number", "e.g., 10")}
+            
+            {renderInputField("date_of_birth", "Date of Birth *", "date")} 
+            
+            {renderInputField("age", "Age (Auto-Calculated)", "number", "e.g., 10", null, true)} 
 
             {renderInputField("phone_no", "Phone Number *", "tel", "10-digit mobile number", 10)}
             
@@ -348,64 +355,22 @@ const AddPlayerForm = () => {
           </CardContent>
         </Card>
 
-        {/* === Family and Emergency === */}
+        {/* === Guardian & Emergency (Medical Added) === */}
         <Card className="shadow-lg">
-          <CardHeader><CardTitle>Guardian & Emergency Contact</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Guardian, Emergency Contact & Medical</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {renderInputField("father_name", "Father's Name", "text", "E.g., John Smith")}
             {renderInputField("mother_name", "Mother's Name", "text", "E.g., Jane Smith")}
 
+            {/* Emergency Contacts Row */}
             <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
               {renderInputField("emergency_contact_number", "Emergency Contact No. *", "tel", "10-digit emergency number", 10)}
               {renderInputField("guardian_contact_number", "Guardian Contact No.", "tel", "Optional 10-digit number", 10)}
               
               {renderInputField("guardian_email_id", "Guardian Email ID", "email", "E.g., guardian@email.com")}
             </div>
-          </CardContent>
-        </Card>
-
-        {/* === Academy and Medical === */}
-        <Card className="shadow-lg">
-          <CardHeader><CardTitle>Academy Details & Medical</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {renderInputField("center_name", "Center Name *", "text", "e.g., North Campus")}
             
-            {/* RENDER COACH SELECT */}
-            {renderCoachSelect()}
-            
-            <div className="space-y-2">
-              <Label htmlFor="category">Category *</Label>
-              <Select
-                id="category"
-                value={formData.category}
-                onValueChange={(v) => handleSelectChange("category", v)}
-              >
-                <SelectTrigger><SelectValue placeholder="Select Category" /></SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map((cat) => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="status">Player Status *</Label>
-              <Select
-                id="status"
-                value={formData.status}
-                onValueChange={(v) => handleSelectChange("status", v)}
-              >
-                <SelectTrigger><SelectValue placeholder="Select Status" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Pending">Pending</SelectItem><SelectItem value="Active">Active</SelectItem><SelectItem value="Inactive">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center space-x-2 pt-6">
-              <Checkbox id="active" checked={formData.active} onCheckedChange={(checked) => handleSelectChange("active", checked)} />
-              <Label htmlFor="active" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Set as Active Player</Label>
-            </div>
-
+            {/* Medical Condition Field (Moved Here) */}
             <div className="md:col-span-3 space-y-2">
               <Label htmlFor="medical_condition">Medical Condition/Notes</Label>
               <Textarea

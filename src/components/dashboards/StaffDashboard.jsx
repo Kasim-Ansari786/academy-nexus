@@ -1,10 +1,40 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 // Import useNavigate from react-router-dom for navigation
 import { useNavigate } from "react-router-dom";
+import * as XLSX from "xlsx"; // Import the xlsx library
 // New Import: Accesses the authentication context
 import { useAuth } from "@/contexts/AuthContext";
-import { MapPin } from "lucide-react";
-import { IndianRupee } from "lucide-react";
+import PendingRegistrations from "@/components/dashboards/PendingRegistrations";
+// 
+// 🔥 FIX: Change import statement for 'file-saver' to use the default import.
+// Previous: import { saveAs } from "file-saver";
+//import saveAs from "file-saver"; 
+//   "@/components/dashboards/AssignStudents"
+import {
+  MapPin,
+  IndianRupee,
+  Users,
+  UserPlus,
+  CreditCard,
+  Calendar,
+  TrendingUp,
+  AlertCircle,
+  DollarSign,
+  FileText,
+  Settings,
+  Edit,
+  Globe,
+  Bell,
+  LogOut,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
+  Search,
+  Download,
+  Upload,
+} from "lucide-react";
+
 import {
   Card,
   CardContent,
@@ -36,26 +66,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Users,
-  UserPlus,
-  CreditCard,
-  Calendar,
-  TrendingUp,
-  AlertCircle,
-  DollarSign,
-  FileText,
-  Settings,
-  Edit,
-  Globe,
-  Bell,
-  LogOut,
-  Loader2,
-  ChevronLeft,
-  ChevronRight,
-  Trash2,
-  Search,
-} from "lucide-react";
 
 // Assumed API functions (assuming they are correctly defined elsewhere)
 import {
@@ -65,9 +75,12 @@ import {
   GetCoachDetails,
   UpdateCoachdata,
   DeactivateCoachdata,
+  fetchVenuesdetails,
+  GetregistrationsData,// Imported venue fetching function
+  // New function for Excel upload  uploadRegistrations, // This is not needed if we use local fetch
 } from "../../../api";
 
-// --- Coach Management Modal Component ---
+// --- Coach Management Modal Component (No Change) ---
 const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
   const [formData, setFormData] = useState(
     coachToEdit || {
@@ -87,13 +100,6 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
 
   // State for showing loading within the modal
   const [isSaving, setIsSaving] = useState(false);
-
-  const handleCategoryChange = (value) => {
-    setFormData((prev) => ({
-      ...prev,
-      category: value,
-    }));
-  };
 
   const handleActiveChange = (checked) => {
     setFormData((prev) => ({
@@ -150,6 +156,9 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
     setIsSaving(false); // Stop saving
     // The modal is closed by the parent component after onSave completes
   };
+
+
+
 
   const title = formData.coach_id ? "Edit Coach" : "Add New Coach";
 
@@ -247,7 +256,7 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
             {/* Active (Switch) and Status Display */}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="active" className="text-right">
-                Active
+                Status
               </Label>
               <div className="col-span-3 flex items-center justify-between">
                 <span> {formData.status}</span>
@@ -274,7 +283,7 @@ const CoachFormDialog = ({ isOpen, onClose, coachToEdit, onSave }) => {
   );
 };
 
-// --- Registration Review Dialog Component (Kept) ---
+// --- Registration Review Dialog Component (No Change) ---
 const RegistrationReviewDialog = ({ isOpen, onClose, registration }) => {
   const { toast } = useToast();
 
@@ -359,7 +368,7 @@ const RegistrationReviewDialog = ({ isOpen, onClose, registration }) => {
   );
 };
 
-// --- Delete Confirmation Dialog Component (Kept) ---
+// --- Delete Confirmation Dialog Component (No Change) ---
 const DeleteConfirmationDialog = ({ isOpen, onClose, onConfirm, name }) => {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -387,7 +396,7 @@ const DeleteConfirmationDialog = ({ isOpen, onClose, onConfirm, name }) => {
   );
 };
 
-// --- Academy Settings Tab Component (Kept) ---
+// --- Academy Settings Tab Component (No Change) ---
 const AcademySettingsTab = () => {
   const { toast } = useToast();
 
@@ -500,7 +509,7 @@ const AcademySettingsTab = () => {
   );
 };
 
-// --- Pagination Control Component (Kept) ---
+// --- Pagination Control Component (No Change) ---
 const PaginationControls = ({ currentPage, totalPages, paginate }) => {
   if (totalPages <= 1) return null;
 
@@ -550,23 +559,25 @@ const StaffDashboard = () => {
   const { toast } = useToast();
   const { logout } = useAuth();
 
+  // Define useRef for the hidden file input
+  const fileInputRef = useRef(null);
+
   const [coaches, setCoaches] = useState([
     {
-      coach_id: null,
-      coach_name: "",
-      phone_numbers: "1",
-      email: "",
-      address: "",
-      players: 0,
-      salary: 0,
-      week_salary: 0,
+      coach_id: 1, // Added a temporary ID to prevent console warnings
+      coach_name: "Coach Example",
+      phone_numbers: "1234567890",
+      email: "test@example.com",
+      address: "123 Street",
+      players: 15,
+      salary: 30000,
+      week_salary: 500,
       category: "Football",
       status: "Active",
       active: true,
-      attendance: 0,
+      attendance: 20,
     },
   ]);
-  // END FIX
 
   // Mock initial data (unchanged)
   const staffData = {
@@ -577,29 +588,11 @@ const StaffDashboard = () => {
     completionRate: 94,
   };
 
-  const pendingRegistrations = [
-    {
-      id: 1,
-      name: "Aarya Palai",
-      parent: "Avinash Palai",
-      date: "2024-02-20",
-      status: "Pending Payment",
-    },
-    {
-      id: 2,
-      name: "Maya Patel",
-      parent: "Ravi Patel",
-      date: "2024-02-19",
-      status: "Document Review",
-    },
-    {
-      id: 3,
-      name: "Alok Biswas",
-      parent: "Biswas",
-      date: "2024-02-18",
-      status: "Pending Payment",
-    },
-  ];
+  // FIX 1: Initialize pendingRegistrations state to resolve ReferenceError
+  const [pendingRegistrations, setPendingRegistrations] = useState([
+    { id: 1, name: "Reg A", parent: "Parent X", date: "2025-11-20", status: "Pending Review" },
+    { id: 2, name: "Reg B", parent: "Parent Y", date: "2025-11-19", status: "Pending Payment" },
+  ]);
 
   const paymentOverview = [
     { month: "January", collected: 42000, pending: 3000, total: 45000 },
@@ -611,6 +604,9 @@ const StaffDashboard = () => {
   const [error, setError] = useState(null);
 
   const [players, setPlayers] = useState([]);
+
+  // FIX 2: New state for venues data
+  const [venues, setVenues] = useState([]);
 
   // --- Search State (NEW) ---
   const [searchTerm, setSearchTerm] = useState("");
@@ -624,20 +620,66 @@ const StaffDashboard = () => {
 
   const [isCoachModalOpen, setIsCoachModalOpen] = useState(false);
   const [editingCoach, setEditingCoach] = useState(null);
+  const [activeTab, setActiveTab] = useState("registrations");
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [reviewingRegistration, setReviewingRegistration] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [playerToDelete, setPlayerToDelete] = useState(null);
+
+  // --------------------------------------------------------------------------
+  // --- EXCEL IMPORT/EXPORT LOGIC ---
+  // --------------------------------------------------------------------------
+
+  // FIX 3: Define bulkImportApi (Local helper to call the backend)
+  const bulkImportApi = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // NOTE: This URL must match your backend server.js import route
+      const response = await fetch('/api/registrations/import', {
+          method: 'POST',
+          body: formData,
+      });
+
+      // Handle HTTP errors (e.g., 404, 500)
+      if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ message: 'Server responded with an error, but no JSON error message was provided.' }));
+          throw new Error(errorData.error || errorData.message || `HTTP error! Status: ${response.status}`);
+      }
+
+      // Handle successful response
+      return await response.json();
+
+    } catch (err) {
+      // Handle network errors (e.g., 'Failed to fetch' - server is down or CORS blocked)
+      if (err instanceof TypeError && err.message === 'Failed to fetch') {
+        throw new Error("Connection failed. Please ensure your backend server is running on and CORS is configured correctly.");
+      }
+      // Re-throw other errors
+      throw err;
+    }
+  };
+
+
+
+
+ 
+  // --------------------------------------------------------------------------
+
+  // --- Modal Open/Close Handlers (No Change) ---
 
   const openAddCoachModal = () => {
     setEditingCoach(null);
     setIsCoachModalOpen(true);
   };
   const openEditCoachModal = (coach) => {
-    // Map the coaches state data back to the format expected by the modal (using coach_name instead of name)
     setEditingCoach({
       ...coach,
-      // Ensure 'coach_id' is used as the primary ID for the form/API
       coach_id: coach.coach_id,
       coach_name: coach.coach_name,
       email: coach.email,
-      address: coach.address, // Use the existing name property for the form's coach_name field
+      address: coach.address,
     });
     setIsCoachModalOpen(true);
   };
@@ -647,6 +689,35 @@ const StaffDashboard = () => {
     setEditingCoach(null);
   };
 
+  const openReviewModal = (registration) => {
+    setReviewingRegistration(registration);
+    setIsReviewModalOpen(true);
+  };
+
+  const closeReviewModal = () => {
+    setIsReviewModalOpen(false);
+    setReviewingRegistration(null);
+  };
+
+  const openAddPlayerModal = () => {
+    navigate("/add-players");
+  };
+
+  const openEditPlayerModal = (player) => {
+    navigate(`/edit-player/${player.id}/${player.player_id}`);
+  };
+
+  const openDeletePlayerModal = (player) => {
+    setPlayerToDelete(player);
+    setIsDeleteModalOpen(true);
+  };
+
+  const closeDeletePlayerModal = () => {
+    setIsDeleteModalOpen(false);
+    setPlayerToDelete(null);
+  };
+
+  // --- Coach Save Logic (No Change) ---
   const handleSaveCoach = useCallback(
     async (newCoachData) => {
       const apiData = {
@@ -714,9 +785,10 @@ const StaffDashboard = () => {
       }
       closeCoachModal();
     },
-    [coaches, toast, closeCoachModal]
+    [coaches, toast]
   );
-  // -----------------------------------------------------------------------
+
+  // --- Coach Delete Logic (No Change) ---
   const handleDeleteCoach = useCallback(
     async (coachId, coachName) => {
       if (
@@ -763,27 +835,7 @@ const StaffDashboard = () => {
     [setCoaches, toast]
   );
 
-  const openAddPlayerModal = () => {
-    navigate("/add-players");
-  };
-
-  const openEditPlayerModal = (player) => {
-    navigate(`/edit-player/${player.id}/${player.player_id}`);
-  };
-
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [playerToDelete, setPlayerToDelete] = useState(null);
-
-  const openDeletePlayerModal = (player) => {
-    setPlayerToDelete(player);
-    setIsDeleteModalOpen(true);
-  };
-
-  const closeDeletePlayerModal = () => {
-    setIsDeleteModalOpen(false);
-    setPlayerToDelete(null);
-  };
-
+  // --- Player Delete Logic (No Change) ---
   const handleDeletePlayer = async () => {
     if (!playerToDelete) return;
 
@@ -814,7 +866,8 @@ const StaffDashboard = () => {
     closeDeletePlayerModal();
   };
 
-  const fetchCoachData = async () => {
+  // --- Fetch Data Logic (FIXED & REVISED) ---
+  const fetchCoachData = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await GetCoachDetails();
@@ -823,6 +876,8 @@ const StaffDashboard = () => {
         coach_id: coach.coach_id,
         players: coach.players,
         coach_name: coach.coach_name,
+        email: coach.email,
+        address: coach.address,
         phone_numbers: coach.phone_numbers,
         salary: coach.salary,
         week_salary: coach.week_salary,
@@ -838,10 +893,31 @@ const StaffDashboard = () => {
     } finally {
       setIsLoading(false);
     }
-  };
-  useEffect(() => {
-    fetchCoachData();
   }, []);
+
+  // FIX 4: Add function to fetch venue data
+  const fetchVenues = useCallback(async () => {
+    try {
+      const data = await fetchVenuesdetails();
+      // Assuming data is an array of venue objects, each with a 'status' property
+      setVenues(data || []);
+    } catch (err) {
+      console.error("Failed to fetch venue data:", err);
+      toast({
+        title: "Error",
+        description: "Failed to load venue data.",
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
+
+  
+
+  // Combined data fetching useEffect
+  useEffect(() => {
+    fetchCoachData();    
+    fetchVenues();
+  }, [fetchCoachData, fetchVenues]);
 
   const fetchPlayers = useCallback(async () => {
     setIsLoading(true);
@@ -882,21 +958,7 @@ const StaffDashboard = () => {
     fetchPlayers();
   }, [fetchPlayers]);
 
-  const [activeTab, setActiveTab] = useState("registrations");
-
-  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [reviewingRegistration, setReviewingRegistration] = useState(null);
-
-  const openReviewModal = (registration) => {
-    setReviewingRegistration(registration);
-    setIsReviewModalOpen(true);
-  };
-
-  const closeReviewModal = () => {
-    setIsReviewModalOpen(false);
-    setReviewingRegistration(null);
-  };
-  // --------------------------------------------------
+  // --- Utility Handlers (No Change) ---
 
   const handleSendReminders = () => {
     toast({
@@ -943,6 +1005,8 @@ const StaffDashboard = () => {
     });
     navigate("/auth");
   };
+
+  // --- Filtering and Pagination Logic (No Change) ---
 
   const filteredPlayers = React.useMemo(() => {
     let currentPlayers = players;
@@ -1042,14 +1106,17 @@ const StaffDashboard = () => {
         </Button>
       </div>
 
+      {/* Data Cards Grid (REVISED) */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        {/* Pending Registrations Card */}
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-yellow-500" />
               <div>
                 <p className="text-2xl font-bold">
-                  {staffData.pendingRegistrations}
+                  {/* Now uses the new state variable length */}
+                  {pendingRegistrations.length}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Pending Registrations
@@ -1058,6 +1125,8 @@ const StaffDashboard = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Total Players Card */}
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -1075,6 +1144,8 @@ const StaffDashboard = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Monthly Revenue Card */}
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -1088,6 +1159,8 @@ const StaffDashboard = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Completion Rate Card */}
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -1102,6 +1175,7 @@ const StaffDashboard = () => {
           </CardContent>
         </Card>
 
+        {/* Active Coaches Card */}
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -1116,12 +1190,15 @@ const StaffDashboard = () => {
           </CardContent>
         </Card>
 
+        {/* Active Venues Card - FIX 3: Using the new 'venues' state */}
         <Card className="shadow-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
               <MapPin className="h-5 w-5 text-blue-600" />
               <div>
-                <p className="text-2xl font-bold">{5}</p>
+                <p className="text-2xl font-bold">
+                  {venues.filter((v) => v.status === "Active").length}
+                </p>
                 <p className="text-xs text-muted-foreground">Active Venues</p>
               </div>
             </div>
@@ -1146,54 +1223,11 @@ const StaffDashboard = () => {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="registrations" className="space-y-4">
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UserPlus className="h-5 w-5" />
-                Pending Registrations
-              </CardTitle>
-              <CardDescription>
-                Review and approve new player registrations
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {pendingRegistrations.map((registration) => (
-                  <div
-                    key={registration.id}
-                    className="flex items-center justify-between p-4 bg-muted rounded-lg"
-                  >
-                    <div>
-                      <p className="font-medium">{registration.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Parent: {registration.parent} • Applied:{" "}
-                        {registration.date}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Badge
-                        variant={
-                          registration.status === "Pending Payment"
-                            ? "destructive"
-                            : "secondary"
-                        }
-                      >
-                        {registration.status}
-                      </Badge>
-                      <Button
-                        size="sm"
-                        onClick={() => openReviewModal(registration)}
-                      >
-                        Review
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+         <TabsContent value="registrations">
+          <PendingRegistrations />
         </TabsContent>
+
+      
 
         <TabsContent value="players" className="space-y-4">
           <Card className="shadow-card">
@@ -1223,7 +1257,7 @@ const StaffDashboard = () => {
                   />
                 </div>
 
-                {/* Status Filter Dropdown (FIXED & CONNECTED TO STATE) */}
+                {/* Status Filter Dropdown (No Change) */}
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
                   <SelectTrigger className="w-full sm:w-[150px] flex-shrink-0">
                     <span className="text-muted-foreground mr-2">Status:</span>
@@ -1472,13 +1506,21 @@ const StaffDashboard = () => {
                         {coach.coach_name ? coach.coach_name.charAt(0) : "?"}
                       </div>
                       <div>
-                        {/* Line 1: Coach Name and Phone Number */}
+                        {/* Line 1: Coach Name, Phone Number, and Weekly Salary */}
                         <p className="font-medium flex items-center gap-2">
                           {coach.coach_name}
                           <span className="text-sm font-normal text-gray-500">
-                            ({coach.phone_numbers}) • ({coach.week_salary}
-                            /session)
+                            ({coach.phone_numbers})
                           </span>
+                          <span className="text-sm font-normal text-green-600">
+                            (₹{coach.week_salary} /session)
+                          </span>
+                        </p>
+
+                        {/* Line 2 (FIXED): Email and Address */}
+                        <p className="text-sm text-muted-foreground flex items-center gap-2 mt-0.5">
+                          <span className="font-normal">{coach.email}</span>
+                          <span className="font-normal">• {coach.address}</span>
                         </p>
                       </div>
                     </div>
@@ -1516,7 +1558,7 @@ const StaffDashboard = () => {
                           )
                         }
                       >
-                        <Trash2 className="h-2 w-2" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>

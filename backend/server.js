@@ -53,13 +53,11 @@ app.use("/uploads", express.static(UPLOAD_DIR));
 // ---------------------------------------------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Files are saved to the 'uploads' directory
     cb(null, UPLOAD_DIR);
   },
 
   filename: (req, file, cb) => {
     const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    // Saves file with a unique name based on its fieldname
     cb(null, file.fieldname + "-" + unique + path.extname(file.originalname));
   },
 });
@@ -175,7 +173,7 @@ app.get("/api/players-details", async (req, res) => {
     const result = await pool.query(`
       SELECT id, player_id, name, age, address, phone_no, center_name, coach_name, category, status
       FROM cd.player_details 
-      ORDER BY id ASC;
+      ORDER BY id,player_id DESC;
     `);
 
     res.json(result.rows);
@@ -188,17 +186,15 @@ app.get("/api/players-details", async (req, res) => {
 // ADD PLAYER (FIXED)
 // ---------------------------------------------
 app.post("/api/players-add", (req, res) => {
-  // 1. Run Multer middleware
   upload(req, res, async (err) => {
     if (err) {
       console.log("❌ Multer upload error:", err);
       return res.status(400).json({ error: "File upload failed" });
     }
 
-    // Safely extract file paths.
     const filePath = (field) => {
       if (req.files && req.files[field] && req.files[field].length > 0) {
-        return `/uploads/${req.files[field][0].filename}`;
+        return `/uploads/${req.files[field][0].filename}`; 
       }
       return null;
     };
@@ -209,49 +205,44 @@ app.post("/api/players-add", (req, res) => {
 
     const data = req.body;
 
-    // 2. Data Conversion (for DB compatibility)
-    const activeStatus = data.active === "true";
     const numericAge = Number(data.age) || null;
 
     try {
       const query = `
         INSERT INTO cd.player_details (
-          name, age, address, center_name, coach_name, category, active, status,
-          father_name, mother_name, gender, date_of_birth, blood_group, email_id,
-          emergency_contact_number, guardian_contact_number, guardian_email_id,
-          medical_condition, aadhar_upload_path, birth_certificate_path,
-          profile_photo_path, phone_no
+          name, age, address, father_name, mother_name, gender, 
+          date_of_birth, blood_group, email_id, emergency_contact_number, 
+          guardian_contact_number, guardian_email_id, medical_condition, 
+          aadhar_upload_path, birth_certificate_path, profile_photo_path, phone_no
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,
-          $9,$10,$11,$12,$13,$14,$15,
-          $16,$17,$18,$19,$20,$21,$22
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
         )
         RETURNING player_id, name; 
       `;
-
+     
       const result = await pool.query(query, [
-        data.name, // $1 (string)
-        numericAge, // $2 (number or null)
-        data.address, // $3 (string)
-        data.center_name, // $4 (string)
-        data.coach_name, // $5 (string)
-        data.category, // $6 (string)
-        activeStatus, // $7 (boolean)
-        data.status, // $8 (string)
-        data.father_name, // $9 (string)
-        data.mother_name, // $10 (string)
-        data.gender, // $11 (string)
-        data.date_of_birth, // $12 (date string)
-        data.blood_group, // $13 (string)
-        data.email_id, // $14 (string)
-        data.emergency_contact_number, // $15 (string)
-        data.guardian_contact_number, // $16 (string)
-        data.guardian_email_id, // $17 (string)
-        data.medical_condition, // $18 (string)
-        aadhar_upload_path, // $19 (string/null)
-        birth_certificate_path, // $20 (string/null)
-        profile_photo_path, // $21 (string/null)
-        data.phone_no, // $22 (string)
+        data.name, 
+        numericAge, 
+        data.address, 
+        
+        data.father_name, 
+        data.mother_name, 
+        data.gender, 
+        data.date_of_birth, 
+        data.blood_group, 
+        data.email_id,
+        
+        data.emergency_contact_number, 
+        data.guardian_contact_number, 
+        data.guardian_email_id, 
+        
+        data.medical_condition,
+        
+        aadhar_upload_path, 
+        birth_certificate_path, 
+        profile_photo_path, 
+        
+        data.phone_no, 
       ]);
 
       res.status(201).json({
@@ -259,18 +250,15 @@ app.post("/api/players-add", (req, res) => {
         player: result.rows[0],
       });
     } catch (error) {
-      // 3. CRITICAL FIX: Handle the PostgreSQL unique constraint violation (Error Code 23505)
       console.error("❌ Database insert failed:", error.message, error.detail);
 
       if (error.code === "23505") {
-        // Return 409 Conflict with the specific detail
         return res.status(409).json({
           error: `A player with this email address already exists.`,
           details: error.detail,
         });
       }
-
-      // Default 500 response for all other unhandled errors
+      
       res.status(500).json({
         error: "Internal Server Error: Database insertion failed.",
         details: error.message,
@@ -280,30 +268,83 @@ app.post("/api/players-add", (req, res) => {
 });
 
 //coach list by the add players coact name list
-app.get("/api/coaches-list", async (req, res) => {
-  console.log("Received request for coach list...");
+app.post("/api/players-add", (req, res) => {
+  upload(req, res, async (err) => {
+    if (err) {
+      console.log("❌ Multer upload error:", err);
+      return res.status(400).json({ error: "File upload failed" });
+    }
 
-  // Your specific SQL query
-  const sqlQuery = `SELECT coach_id, coach_name,category FROM cd.coaches_details ORDER BY coach_id ASC`;
+    // CORRECT: Logic to extract file paths saved in the 'uploads' folder
+    const filePath = (field) => {
+      if (req.files && req.files[field] && req.files[field].length > 0) {
+        return `/uploads/${req.files[field][0].filename}`; 
+      }
+      return null;
+    };
 
-  try {
-    const client = await pool.connect();
+    const profile_photo_path = filePath("profile_photo_path");
+    const aadhar_upload_path = filePath("aadhar_upload_path");
+    const birth_certificate_path = filePath("birth_certificate_path");
 
-    // Execute the query
-    const result = await client.query(sqlQuery);
-    client.release();
-    console.log(`Successfully retrieved ${result.rows.length} coaches.`);
-    return res.json(result.rows);
-  } catch (err) {
-    console.error("Error executing query for coaches:", err.stack);
-    // Send a 500 Internal Server Error response
-    return res.status(500).json({
-      message: "Failed to fetch coach list from the database.",
-      error: err.message,
-    });
-  }
+    const data = req.body;
+
+    const numericAge = Number(data.age) || null;
+
+    try {
+      const query = `
+        INSERT INTO cd.player_details (
+          name, age, address, father_name, mother_name, gender, 
+          date_of_birth, blood_group, email_id, emergency_contact_number, 
+          guardian_contact_number, guardian_email_id, medical_condition, 
+          aadhar_upload_path, birth_certificate_path, profile_photo_path, phone_no
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
+        )
+        RETURNING player_id, name; 
+      `;
+     
+      const result = await pool.query(query, [
+        data.name, 
+        numericAge, 
+        data.address, 
+        data.father_name, 
+        data.mother_name, 
+        data.gender, 
+        data.date_of_birth, 
+        data.blood_group, 
+        data.email_id,
+        data.emergency_contact_number, 
+        data.guardian_contact_number, 
+        data.guardian_email_id, 
+        data.medical_condition,
+        aadhar_upload_path, 
+        birth_certificate_path, 
+        profile_photo_path, 
+        data.phone_no, 
+      ]);
+
+      res.status(201).json({
+        message: "Player added successfully",
+        player: result.rows[0],
+      });
+    } catch (error) {
+      console.error("❌ Database insert failed:", error.message, error.detail);
+
+      if (error.code === "23505") {
+        return res.status(409).json({
+          error: `A player with this email address already exists.`,
+          details: error.detail,
+        });
+      }
+      
+      res.status(500).json({
+        error: "Internal Server Error: Database insertion failed.",
+        details: error.message,
+      });
+    }
+  });
 });
-
 //---------------------------------------------
 //Edit the player details
 //---------------------------------------------
@@ -637,22 +678,51 @@ app.post("/api/coaches-add", async (req, res) => {
   }
 });
 
+
+//assgin the coach and players 
+//coach list by the add players coact name list
+app.get("/api/coaches-list", async (req, res) => {
+  console.log("Received request for coach list...");
+
+  // Your specific SQL query
+  const sqlQuery = `SELECT coach_id, coach_name,category FROM cd.coaches_details ORDER BY coach_id ASC`;
+
+  try {
+    const client = await pool.connect();
+
+    // Execute the query
+    const result = await client.query(sqlQuery);
+    client.release();
+    console.log(`Successfully retrieved ${result.rows.length} coaches.`);
+    return res.json(result.rows);
+  } catch (err) {
+    console.error("Error executing query for coaches:", err.stack);
+    // Send a 500 Internal Server Error response
+    return res.status(500).json({
+      message: "Failed to fetch coach list from the database.",
+      error: err.message,
+    });
+  }
+});
+
 // ---------------------------------------------
 //COACHES GET ROUTE
 // ---------------------------------------------
 app.get("/api/coach-details", async (req, res) => {
   try {
     const queryText = `
-       SELECT coach_id,
-	       players,
-	       coach_name,
-		   phone_numbers,
-		   salary,
-		   attendance,
-		   week_salary,
-		   category,
-		   status
-	FROM cd.coaches_details ORDER BY coach_id ASC  
+        SELECT coach_id,
+          players,
+          coach_name,
+          phone_numbers,
+          salary,
+          email,
+          address,
+          attendance,
+          week_salary,
+          category,
+           status
+     FROM cd.coaches_details ORDER BY coach_id DESC 
     `;
     const result = await pool.query(queryText);
     res.json(result.rows);
@@ -892,85 +962,87 @@ app.post("/api/update-coach", async (req, res) => {
 });
 
 //venue data formatting function
-function formatVenueData(rows) {
-  const venuesMap = new Map();
+const formatVenueData = (rows) => {
+    const venuesMap = new Map();
 
-  for (const row of rows) {
-    // Initialize Venue
-    if (!venuesMap.has(row.venue_id)) {
-      venuesMap.set(row.venue_id, {
-        id: row.venue_id.toString(),
-        name: row.venue_name,
-        centerHead: row.center_head,
-        address: row.address,
-        timeSlots: new Map(),
-      });
-    }
+    rows.forEach(row => {
+        // Ensure these match the double-quoted aliases in the SQL query
+        const {
+            id, name, centerHead, address, googleMapsUrl,
+            timeslotId, startTime, endTime, day
+        } = row;
 
-    const venue = venuesMap.get(row.venue_id);
+        // 1. Create the main venue entry if it doesn't exist
+        if (!venuesMap.has(id)) {
+            venuesMap.set(id, {
+                id,
+                name,
+                centerHead,
+                address,
+                googleMapsUrl,
+                operatingHours: [], // Array to hold all time slots
+            });
+        }
 
-    // Process Time Slots
-    if (row.timeslot_id) {
-      if (!venue.timeSlots.has(row.timeslot_id)) {
-        venue.timeSlots.set(row.timeslot_id, {
-          id: row.timeslot_id.toString(),
-          startTime: row.start_time,
-          endTime: row.end_time,
-          days: [],
-        });
-      }
-    }
+        const venue = venuesMap.get(id);
 
-    // Process Days
-    if (row.day && row.timeslot_id) {
-      const slot = venue.timeSlots.get(row.timeslot_id);
-      if (!slot.days.includes(row.day)) {
-        slot.days.push(row.day);
-      }
-    }
-  }
+        // 2. Only add time slots if the necessary data is present (non-NULL from LEFT JOIN)
+        if (timeslotId && startTime && endTime && day) {
+            
+            // Prevent duplicate slots if ORDER BY logic is complex
+            const isSlotAlreadyAdded = venue.operatingHours.some(
+                slot => slot.day === day && slot.startTime === startTime && slot.endTime === endTime
+            );
 
-  // Final formatting: Convert Maps back to Arrays
-  return Array.from(venuesMap.values()).map((venue) => ({
-    ...venue,
-    timeSlots: Array.from(venue.timeSlots.values()),
-  }));
-}
+            if (!isSlotAlreadyAdded) {
+                 venue.operatingHours.push({
+                    day: day,
+                    startTime: startTime,
+                    endTime: endTime,
+                    timeslotId: timeslotId, 
+                });
+            }
+        }
+    });
+
+    // Convert Map values back to an array for the response
+    return Array.from(venuesMap.values());
+};
 
 //fetch venue data
 app.get("/api/venues-Details", async (req, res) => {
-  const sqlQuery = `
-        SELECT 
-            v.id AS venue_id,
-            v.name AS venue_name,
-            v.center_head,
-            v.address,
-            v.google_url,
-            ts.id AS timeslot_id,
-            ts.start_time,
-            ts.end_time,
-            d.day
-        FROM cd.venues_data v  
-        LEFT JOIN cd.venuetime_slots ts 
-            ON ts.venue_id = v.id
-        LEFT JOIN cd.venuetimeslot_days d
-            ON d.time_slot_id = ts.id
-            WHERE v.active = true
-        ORDER BY v.id, ts.id, d.day;
-    `;
+  const sqlQuery = `
+SELECT
+    v.id,
+    v.name AS name,
+    v.status,
+    v.center_head AS "centerHead",
+    v.address,
+    v.google_url AS "googleMapsUrl",
+    ts.id AS "timeslotId",
+    ts.start_time AS "startTime",
+    ts.end_time AS "endTime",
+    d.day AS day
+FROM cd.venues_data v
+LEFT JOIN cd.venuetime_slots ts
+    ON ts.venue_id = v.id
+LEFT JOIN cd.venuetimeslot_days d
+    ON d.time_slot_id = ts.id
+WHERE v.active = true
+ORDER BY v.id, ts.id, d.day;
+`.trim();
 
-  try {
-    const result = await pool.query(sqlQuery);
-    const structuredData = formatVenueData(result.rows);
+  try {
+    const result = await pool.query(sqlQuery);
+    const structuredData = formatVenueData(result.rows);
 
-    res.status(200).json(structuredData);
-  } catch (err) {
-    // *** CRITICAL: Check your Node.js console for the full error details ***
-    console.error("Database query error (Check Table/Schema names):", err);
-    res
-      .status(500)
-      .json({ error: "Failed to retrieve venue data.", details: err.message });
-  }
+    res.status(200).json(structuredData);
+  } catch (err) {
+    console.error("Database query error:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to retrieve venue data.", details: err.message });
+  }
 });
 
 ///venus add the route here
@@ -1122,60 +1194,71 @@ app.delete("/api/venues-delete/:id", async (req, res) => {
 
 //Start this serever coach details and Database dashboard working fine
 // The SQL Query Constant
-app.get("/api/coach-data/:coachId", authenticateToken, async (req, res) => {
-  // Check if the authenticated user is authorized to view this data
-  if (req.user.role !== "coach" || String(req.user.id) !== req.params.coachId) {
-    // For a simple app, we allow the authenticated coach to view their own data.
-    // For security, you might enforce: req.user.id == req.params.coachId
-  }
+const sql = (strings, ...values) => {
+    let query = strings.reduce((acc, str, i) => acc + str + (values[i] !== undefined ? values[i] : ''), '');
+    query = query.trim();
+    const lines = query.split('\n').map(line => line.trim());
+    return lines.filter(line => line.length > 0).join(' ');
+};
 
-  const coachId = req.params.coachId;
-  if (!coachId) {
-    return res.status(400).json({ error: "Missing coach ID parameter." });
-  }
-  try {
-    const result = await pool.query(
-      `
-            SELECT
-                p.player_id,
-                p.name,
-                p.age,
-                p.category, -- Used as position in the front-end
-                p.status,
-                ROUND(
-                    (SUM(CASE WHEN a.is_present = TRUE THEN 1 ELSE 0 END) * 100.0)
-                    / NULLIF(COUNT(a.attendance_id), 0),
-                    2
-                ) AS attendance_percentage
-            FROM cd.player_details p
-            LEFT JOIN cd.attendance_sheet a
-                ON p.player_id = a.player_id
-            INNER JOIN cd.users_login u
-                ON p.coach_id = u.id
-            WHERE
-                u.id = $1
-                AND u.role = 'coach' and p.active = TRUE
-            GROUP BY
-                p.player_id, p.name, p.age, p.category, p.status
-            ORDER BY
-                p.name;
-        `,
-      [coachId]
-    );
+app.get("/api/coach-data", authenticateToken, async (req, res) => {
+  // 1. Authorization Check: Ensure only coaches can access this route.
+  if (req.user.role !== "coach") {
+    return res.status(403).json({ error: "Access denied. Only coaches can view this data." });
+  }
 
-    // Return the structured response expected by the front-end API call
-    res.json({
-      coach_id: coachId,
-      players: result.rows,
-    });
-  } catch (err) {
-    console.error("Error executing query:", err.stack);
-    res
-      .status(500)
-      .json({ error: "Internal server error while fetching player data." });
-  }
+  // 2. Identify the user by their authenticated email.
+  const coachEmail = req.user.email;
+  
+  if (!coachEmail) {
+    return res.status(400).json({ error: "Authenticated user email is missing." });
+  }
+
+  try {
+    // Using the 'sql' template tag to safely format and clean the query string
+    const queryString = sql`
+SELECT 
+    p.player_id AS id,
+    p.name,
+    p.age,
+    p.category,
+    p.status,
+    ROUND(
+        (SUM(CASE WHEN a.is_present = TRUE THEN 1 ELSE 0 END) * 100.0)
+        / NULLIF(COUNT(a.attendance_id), 0),
+        2
+    ) AS attendance
+FROM cd.player_details p
+LEFT JOIN cd.attendance_sheet a ON p.player_id = a.player_id
+INNER JOIN cd.coaches_details c ON p.coach_id = c.coach_id
+INNER JOIN cd.users_login u ON c.email = u.email
+WHERE
+    u.email = $1
+    AND u.role = 'coach'
+    AND p.active = TRUE
+GROUP BY
+    p.player_id, p.name, p.age, p.category, p.status
+ORDER BY
+    p.name;
+    `;
+
+    const result = await pool.query(
+      queryString,
+      [coachEmail]
+    );
+
+    // Return the structured response
+    res.json({
+      coach_email: coachEmail,
+      players: result.rows,
+    });
+  } catch (err) {
+    console.error("Error executing coach data query:", err.stack);
+    res
+      .status(500)
+      .json({ error: "Internal server error while fetching player data." });
+  }
 });
-
 // ---------------------------------------------
 // Attendance Recording Endpoint
 // ---------------------------------------------
@@ -1279,6 +1362,190 @@ app.get("/api/player-details/:email", authenticateToken, async (req, res) => {
       .json({ error: "Internal server error while fetching player data." });
   }
 });
+
+app.use(express.json());
+
+//fech data registrations API and code
+app.get('/api/registrations', async (req, res) => {
+  const sqlQuery = `
+    SELECT
+      regist_id,
+      name,
+      phone_number,
+      email_id,
+      address,
+      age,
+      application_date,
+      parent_name,
+      Status,
+      active
+    FROM cd.registrations_details
+    ORDER BY regist_id DESC;
+  `;
+
+  try {
+    const client = await pool.connect();
+    const result = await client.query(sqlQuery);
+    client.release();
+
+    res.status(200).json({
+      success: true,
+      data: result.rows,
+      count: result.rowCount
+    });
+
+  } catch (err) {
+    console.error("Error executing query:", err);
+    res.status(500).json({ error: "Database query failed." });
+  }
+});
+
+//Endpoint for Bulk Uploading New Registrations from Excel
+app.post('/api/registrations/bulk-upload', async (req, res) => {
+    const registrations = req.body;
+
+    if (!Array.isArray(registrations) || registrations.length === 0) {
+        return res.status(400).json({ error: 'Invalid or empty array' });
+    }
+
+    // --- DEBUGGING LOG ---
+    console.log(`Received ${registrations.length} registrations for bulk upload.`);
+    // ---------------------
+
+    const columns = [
+        "name",
+        "phone_number",
+        "email_id",
+        "address",
+        "age",
+        "application_date",
+        "parent_name"
+    ];
+
+    const values = [];
+    const placeholders = registrations.map((reg, index) => {
+        const base = index * columns.length + 1;
+
+        // Ensure explicit handling of nulls for database
+        values.push(
+            reg.name || null,
+            reg.phone_number || null,
+            reg.email_id || null, 
+            reg.address || null,
+            reg.age !== undefined && reg.age !== null ? reg.age : null, // Age can be 0, so check for undefined/null
+            reg.application_date || null,
+            reg.parent_name || null
+        );
+
+        return `(${columns.map((_, i) => `$${base + i}`).join(",")})`;
+    }).join(",");
+
+    const sql = `
+        INSERT INTO cd.registrations_details
+        (${columns.join(",")})
+        VALUES ${placeholders}
+        ON CONFLICT (email_id) DO NOTHING
+        RETURNING *;
+    `;
+    
+    // --- DEBUGGING LOG ---
+    console.log("Generated SQL (Snippet):", sql.substring(0, 100) + '...');
+    // ---------------------
+
+    try {
+        const result = await pool.query(sql, values);
+        
+        // --- DEBUGGING LOG ---
+        console.log(`Database query successful. Inserted: ${result.rowCount} rows.`);
+        // ---------------------
+
+        return res.status(201).json({
+            success: true,
+            inserted: result.rowCount,
+            totalRecordsAttempted: registrations.length, // Added for better client feedback
+            newRecords: result.rows
+        });
+    } catch (err) {
+        // --- CRITICAL ERROR LOG ---
+        console.error("!!! DB ERROR (Bulk Insert Failed) !!!", err);
+        // --------------------------
+        return res.status(500).json({
+            error: "Database insert failed",
+            details: err.message
+        });
+    }
+});
+
+
+//updated the reaject and approved Registrations Excell
+app.put('/api/registrations/status/:id', async (req, res) => {  
+    const { id } = req.params;
+    const { status } = req.body; 
+
+    if (!status || !id) {
+        return res.status(400).json({ error: "Missing required fields: status or registration ID." });
+    }
+
+    const sqlQuery = `
+      UPDATE cd.registrations_details 
+      SET Status = $1 
+      WHERE regist_id = $2
+    `;
+    const values = [status, id];
+
+    try {
+        const client = await pool.connect();
+        const result = await client.query(sqlQuery, values);
+        client.release();
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ success: false, message: `Registration with ID ${id} not found.` });
+        }
+
+        res.status(200).json({ 
+            success: true, 
+            message: `Registration ${id} status updated to ${status}.` 
+        });
+
+    } catch (err) {
+        console.error("Error executing PUT query:", err);
+        res.status(500).json({ error: "Database update failed." });
+    }
+});
+
+//Delete the Registrations Serever.js and API 
+app.put('/api/registrations/reject', async (req, res) => {
+  const { id } = req.body;
+  if (!id) {
+    return res.status(400).json({ error: 'Registration ID (id) is required.' });
+  }
+
+  try {
+    const queryText = `
+      UPDATE cd.registrations_details 
+      SET active = false, Status = 'Rejected' 
+      WHERE regist_id = $1
+      RETURNING *;
+    `;
+    
+    
+    const result = await pool.query(queryText, [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: `Registration with ID ${id} not found.` });
+    }
+   
+    res.status(200).json({ 
+      message: 'Registration successfully rejected.',
+      rejectedRegistration: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Error rejecting registration:', error.stack);
+    res.status(500).json({ error: 'Failed to reject registration due to a server error.' });
+  }
+});
+
 // ---------------------------------------------
 // START SERVER
 // ---------------------------------------------

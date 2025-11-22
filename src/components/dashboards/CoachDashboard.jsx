@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-// FIX: Import useNavigate from react-router-dom
 import { useNavigate } from "react-router-dom";
-// Assuming these are imports from your component library
 import {
   Card,
   CardContent,
@@ -13,9 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar";
-import { useToast } from "@/components/ui/use-toast"; // Used for toast.success/error
+import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-// Removed unused RadioGroup imports
 import {
   Users,
   Calendar as CalendarIcon,
@@ -25,7 +22,6 @@ import {
   UserCheck,
   Target,
 } from "lucide-react";
-// Assuming you have both functions exported from this path
 import { fetchCoachAssignedPlayers, recordAttendance } from "../../../api";
 
 const CoachDashboard = () => {
@@ -35,10 +31,11 @@ const CoachDashboard = () => {
   const [assignedPlayers, setAssignedPlayers] = useState([]);
   const [isLoadingPlayers, setIsLoadingPlayers] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { toast } = useToast(); // Destructure toast
+  const { toast } = useToast();
   const [localAttendance, setLocalAttendance] = useState({});
   const navigate = useNavigate();
 
+  // Get the token securely from the session
   const token = session?.accessToken;
 
   // --- HANDLERS ---
@@ -55,7 +52,9 @@ const CoachDashboard = () => {
     setIsSubmitting(true);
 
     const dateString = selectedDate.toISOString().split("T")[0];
-    const coachId = user.id;
+    
+    // Use user.email as the identifier for the coach in the attendance payload.
+    const coachId = user.email; 
 
     try {
       const submissionPromises = assignedPlayers.map((player) => {
@@ -82,7 +81,7 @@ const CoachDashboard = () => {
       toast({
         title: "Attendance Submitted",
         description: `Attendance recorded for ${results.length} players on ${dateString}.`,
-        variant: "success", // Assuming you have a 'success' variant defined
+        variant: "success", 
       });
 
       // Optionally reset local attendance state after success
@@ -138,7 +137,11 @@ const CoachDashboard = () => {
       return;
     }
 
-    if (!user || !user.id || !token) {
+    // 🚩 FIX: Explicitly check for the token before proceeding.
+    // This prevents the API call if the token is null/undefined during auth initialization.
+    if (!user || !user.email || !token) { 
+      // If we don't have a token but auth is done, we might redirect later.
+      // For now, just exit the effect and clear the data.
       setAssignedPlayers([]);
       setIsLoadingPlayers(false);
       return;
@@ -149,7 +152,8 @@ const CoachDashboard = () => {
     const fetchPlayers = async () => {
       setIsLoadingPlayers(true);
       try {
-        const players = await fetchCoachAssignedPlayers(user.id, token);
+        // We know 'token' is available here due to the check above
+        const players = await fetchCoachAssignedPlayers(token); 
         if (!isMounted) return;
         setAssignedPlayers(players || []);
       } catch (error) {
@@ -165,7 +169,8 @@ const CoachDashboard = () => {
     return () => {
       isMounted = false;
     };
-  }, [isAuthLoading, user, token]);
+  // Depend on token so the fetch runs as soon as it's loaded by useAuth
+  }, [isAuthLoading, user, token]); 
   // ----------------------------------------
 
   // --- STATIC UI DATA ---
@@ -232,7 +237,6 @@ const CoachDashboard = () => {
           <div className="mt-2 text-sm text-primary-foreground/70 space-y-1">
             <p>Email: {user?.email || "—"}</p>
             <p>Role: {user?.role || "—"}</p>
-            {/* <p>Coach ID: {user?.id || "—"}</p> */}
           </div>
         </div>
 
@@ -333,9 +337,9 @@ const CoachDashboard = () => {
                   Loading players...
                 </div>
               ) : assignedPlayers.length === 0 ? (
+                // Clarified the failure message to refer to the coach's email.
                 <div className="p-4 text-center text-muted-foreground">
-                  No players assigned to this coach ID ({user.id}) or failed to
-                  fetch.
+                  No players assigned to coach {user.email} or failed to fetch.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -496,7 +500,7 @@ const CoachDashboard = () => {
 
                         {/* --- Toggle Switch for Attendance --- */}
                         <div className="flex items-center space-x-3">
-                          {/* Display Current Status Text - FIX: Uncommented the display text */}
+                          {/* Display Current Status Text */}
                           <span
                             className={`font-medium min-w-[55px] text-right ${
                               isPresent ? "text-success" : "text-destructive"
