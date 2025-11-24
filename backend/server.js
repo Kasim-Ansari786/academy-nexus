@@ -10,7 +10,7 @@ import jwt from "jsonwebtoken";
 const { Pool } = pg;
 
 const app = express();
-//const PORT = 3001;
+
 
 const PORT = process.env.PORT || 5000;
 
@@ -1551,5 +1551,5 @@ app.put('/api/registrations/reject', async (req, res) => {
 // START SERVER
 // ---------------------------------------------
 app.listen(PORT, () => {
-  console.log(`✔ Server running: http://localhost:${PORT}`);
+  console.log('Server running on port ${PORT}');
 });
