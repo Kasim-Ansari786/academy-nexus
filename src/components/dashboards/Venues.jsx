@@ -43,7 +43,9 @@ import {
   UserX,
   X,
   Check,
-  Home, 
+  Home,
+  ChevronLeft, // New import for pagination
+  ChevronRight, // New import for pagination
 } from "lucide-react";
 // Ensure all API functions are imported
 import {
@@ -72,9 +74,9 @@ const initialTimeSlot = { startTime: "", endTime: "" };
 const initialOperatingHours = weekDays.map((day) => ({
   day: day,
   // FIX 1: Default status to "Enter Hours" to immediately show time inputs
-  status: "Enter Hours", 
+  status: "Enter Hours",
   // FIX 2: Initialize with one empty slot
-  slots: [{ ...initialTimeSlot }], 
+  slots: [{ ...initialTimeSlot }],
 }));
 
 const initialVenueForm = {
@@ -86,6 +88,9 @@ const initialVenueForm = {
 };
 // --- END State Definitions ---
 
+// --- Pagination Constant ---
+const VENUES_PER_PAGE = 5;
+
 export default function StaffDashboard() {
   const { toast } = useToast();
   const [venues, setVenues] = useState([]);
@@ -94,16 +99,15 @@ export default function StaffDashboard() {
   const [players, setPlayers] = useState([]);
   const [coaches, setCoaches] = useState([]);
 
-  // Player selection state: Array of player IDs (for multi-select)
   const [selectedPlayers, setSelectedPlayers] = useState([]);
-  // Coach selection state: Single coach ID (Number)
   const [selectedCoach, setSelectedCoach] = useState(null);
-
-  // Popover state for player selection
   const [isPlayerPopoverOpen, setIsPlayerPopoverOpen] = useState(false);
-
-  // FIX: New state for search functionality
   const [searchTerm, setSearchTerm] = useState("");
+  
+  // --- NEW STATES FOR VENUE MANAGEMENT ---
+  const [searchTermVenue, setSearchTermVenue] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  // --- END NEW STATES ---
 
   useEffect(() => {
     // API DATA FETCHING
@@ -165,9 +169,10 @@ export default function StaffDashboard() {
           const operatingHours = rawHours
             .map((slot) => ({
               day: slot.day,
-              // Use existing camelCase key if present, otherwise fallback to snake_case
-              startTime: slot.startTime || slot.start_time,
-              endTime: slot.endTime || slot.end_time,
+              // ***** BACKEND FIX: Check for multiple common API keys for time *****
+              startTime: slot.startTime || slot.start_time || slot.start || "",
+              endTime: slot.endTime || slot.end_time || slot.end || "",
+              // ******************************************************************
               // Filter out slots that are completely empty
             }))
             .filter((slot) => slot.day && (slot.startTime || slot.endTime));
@@ -194,9 +199,6 @@ export default function StaffDashboard() {
     loadVenues();
   }, []);
 
-  // --- Helper functions for Venue Form ---
-
-  // FIX 3: Completed and corrected logic for handleDayStatusChange
   const handleDayStatusChange = (dayIndex, status) => {
     setVenueForm((prev) => {
       const newOperatingHours = [...prev.operatingHours];
@@ -222,8 +224,8 @@ export default function StaffDashboard() {
     setVenueForm((prev) => {
       const newOperatingHours = [...prev.operatingHours];
       // When a slot is added, ensure status is set to "Open Day" if it's the initial "Enter Hours"
-      if(newOperatingHours[dayIndex].status === "Enter Hours") {
-          newOperatingHours[dayIndex].status = "Open Day";
+      if (newOperatingHours[dayIndex].status === "Enter Hours") {
+        newOperatingHours[dayIndex].status = "Open Day";
       }
       newOperatingHours[dayIndex].slots.push({ ...initialTimeSlot });
       return { ...prev, operatingHours: newOperatingHours };
@@ -250,36 +252,34 @@ export default function StaffDashboard() {
     setVenueForm((prev) => {
       const newOperatingHours = [...prev.operatingHours];
       if (newOperatingHours[dayIndex].slots[slotIndex]) {
-          // When a user starts typing/selecting time, change the status from 
-          // default "Enter Hours" to "Open Day" to confirm user intent.
-          if(newOperatingHours[dayIndex].status === "Enter Hours") {
-             newOperatingHours[dayIndex].status = "Open Day";
-          }
+        // When a user starts typing/selecting time, change the status from
+        // default "Enter Hours" to "Open Day" to confirm user intent.
+        if (newOperatingHours[dayIndex].status === "Enter Hours") {
+          newOperatingHours[dayIndex].status = "Open Day";
+        }
         newOperatingHours[dayIndex].slots[slotIndex][field] = value;
       }
       return { ...prev, operatingHours: newOperatingHours };
     });
   };
-  // --- END Helper functions for Venue Form ---
-
 
   const handleSubmitVenue = async (e) => {
     e.preventDefault();
 
     // FIX A: Required fields validation
     if (
-        !venueForm.name ||
-        !venueForm.centerHead ||
-        !venueForm.address ||
-        !venueForm.googleMapsUrl
+      !venueForm.name ||
+      !venueForm.centerHead ||
+      !venueForm.address ||
+      !venueForm.googleMapsUrl
     ) {
-        toast({
-            title: "Validation Error",
-            description:
-                "Please fill in all required fields (Name, Head, Address, Google Maps URL).",
-            variant: "destructive",
-        });
-        return;
+      toast({
+        title: "Validation Error",
+        description:
+          "Please fill in all required fields (Name, Head, Address, Google Maps URL).",
+        variant: "destructive",
+      });
+      return;
     }
 
     // Validation for Operating Hours
@@ -289,76 +289,77 @@ export default function StaffDashboard() {
     const submissionSlots = [];
 
     venueForm.operatingHours.forEach((dayEntry) => {
-        // Check for statuses that imply the day is open for business
-        const isDayOpenStatus =
-            dayEntry.status === "Open Day" || dayEntry.status === "Enter Hours";
+      // Check for statuses that imply the day is open for business
+      const isDayOpenStatus =
+        dayEntry.status === "Open Day" || dayEntry.status === "Enter Hours";
 
-        if (isDayOpenStatus) {
-            if (dayEntry.slots.length === 0) {
-                // This means the user left it as "Open Day" but cleared all slots.
-                // We'll treat this as "Closed" for submission but flag the form inconsistency.
-                hasOpenDayWithNoSlots = true; 
-            }
-
-            dayEntry.slots.forEach((slot) => {
-                // Check for incomplete slots (one field filled, but not the other)
-                if ((slot.startTime && !slot.endTime) || (!slot.startTime && slot.endTime)) {
-                    hasIncompleteSlot = true;
-                }
-
-                // Only add fully completed slots to the submission
-                if (slot.startTime && slot.endTime) {
-                    hasValidSlots = true; 
-                    submissionSlots.push({
-                        day: dayEntry.day,
-                        startTime: slot.startTime,
-                        endTime: slot.endTime,
-                    });
-                }
-            });
+      if (isDayOpenStatus) {
+        if (dayEntry.slots.length === 0) {
+          // This means the user left it as "Open Day" but cleared all slots.
+          // We'll treat this as "Closed" for submission but flag the form inconsistency.
+          hasOpenDayWithNoSlots = true;
         }
-        
-        // IMPORTANT: If status is explicitly "Closed", no slots will be in dayEntry.slots, 
-        // and no slots will be pushed to submissionSlots, which is the desired behavior.
+
+        dayEntry.slots.forEach((slot) => {
+          // Check for incomplete slots (one field filled, but not the other)
+          if (
+            (slot.startTime && !slot.endTime) ||
+            (!slot.startTime && slot.endTime)
+          ) {
+            hasIncompleteSlot = true;
+          }
+
+          // Only add fully completed slots to the submission
+          if (slot.startTime && slot.endTime) {
+            hasValidSlots = true;
+            submissionSlots.push({
+              day: dayEntry.day,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+            });
+          }
+        });
+      }
+
+      // IMPORTANT: If status is explicitly "Closed", no slots will be in dayEntry.slots,
+      // and no slots will be pushed to submissionSlots, which is the desired behavior.
     });
 
     // FIX B: Incomplete slot validation
     if (hasIncompleteSlot) {
-        toast({
-            title: "Validation Error",
-            description:
-                "All time slots must have both a start time and an end time.",
-            variant: "destructive",
-        });
-        return;
+      toast({
+        title: "Validation Error",
+        description:
+          "All time slots must have both a start time and an end time.",
+        variant: "destructive",
+      });
+      return;
     }
 
-    // FIX C: Day status inconsistency validation 
+    // FIX C: Day status inconsistency validation
     // This checks if the user explicitly set a day to "Open Day" but then removed all slots.
     if (
-        hasOpenDayWithNoSlots && 
-        venueForm.operatingHours.some(d => d.status === "Open Day")
+      hasOpenDayWithNoSlots &&
+      venueForm.operatingHours.some((d) => d.status === "Open Day")
     ) {
-        // Only error if the user has an explicit 'Open Day' status with no slots.
-        toast({
-            title: "Validation Error",
-            description: "An 'Open Day' must have at least one valid time slot.",
-            variant: "destructive",
-        });
-        return;
+      // Only error if the user has an explicit 'Open Day' status with no slots.
+      toast({
+        title: "Validation Error",
+        description: "An 'Open Day' must have at least one valid time slot.",
+        variant: "destructive",
+      });
+      return;
     }
 
     // FIX D: Ensure at least one actual, valid operating hour is entered for the entire venue
     if (submissionSlots.length === 0) {
       toast({
         title: "Validation Error",
-        description:
-          "Please enter at least one valid time slot for the venue.",
+        description: "Please enter at least one valid time slot for the venue.",
         variant: "destructive",
       });
       return;
     }
-
 
     try {
       const dataToSubmit = {
@@ -388,13 +389,16 @@ export default function StaffDashboard() {
 
       setVenueForm(initialVenueForm);
       setShowVenueForm(false);
+      // Reset pagination to first page after adding a new venue
+      setCurrentPage(1); 
+      setSearchTermVenue(""); // Clear search to see the new venue
     } catch (error) {
       console.error("Venue submission failed:", error);
       toast({
         title: "Submission Failed",
         description:
           error.message || "Could not add venue due to a server error.",
-        variant: "destructive",
+          variant: "destructive",
       });
     }
   };
@@ -410,6 +414,14 @@ export default function StaffDashboard() {
         description: result.message || `Venue ID ${id} successfully removed.`,
         variant: "success",
       });
+      // Re-evaluate page number after deletion
+      if (
+        (updated.length % VENUES_PER_PAGE === 0) &&
+        (currentPage > Math.ceil(updated.length / VENUES_PER_PAGE)) &&
+        currentPage > 1
+      ) {
+        setCurrentPage(prev => prev - 1);
+      }
     } catch (error) {
       console.error("Deletion failed:", error);
       toast({
@@ -423,7 +435,6 @@ export default function StaffDashboard() {
   const unassignedPlayers = players.filter((p) => !p.coachId);
   const assignedPlayers = players.filter((p) => p.coachId);
 
-  // Helper to get coach name
   const getCoachName = (coachId) => {
     if (coachId === null || coachId === undefined) return "N/A";
 
@@ -431,7 +442,6 @@ export default function StaffDashboard() {
     return coach ? coach.coach_name : "N/A";
   };
 
-  // Toggle player selection in the array
   const handlePlayerCheckboxChange = (playerId) => {
     setSelectedPlayers((prev) => {
       if (prev.includes(playerId)) {
@@ -447,12 +457,10 @@ export default function StaffDashboard() {
   };
 
   const handleApplyPlayers = () => {
-    // Clear search term when selection is applied
     setSearchTerm("");
     setIsPlayerPopoverOpen(false);
   };
 
-  // HELPER: Get a concise display string for selected players (shows names)
   const getSelectedPlayerDisplay = () => {
     const selectedNames = selectedPlayers
       .map((id) => {
@@ -472,7 +480,6 @@ export default function StaffDashboard() {
     return `${selectedNames[0]}... (+${selectedNames.length - 1} more)`;
   };
 
-  // FIX: Filtering logic using useMemo
   const filteredPlayers = useMemo(() => {
     if (!searchTerm) {
       return players;
@@ -499,7 +506,7 @@ export default function StaffDashboard() {
     });
   }, [players, searchTerm]);
 
-  // Updated handleAssign to loop over all selected players
+
   const handleAssign = async () => {
     if (selectedPlayers.length === 0 || selectedCoach === null) {
       toast({
@@ -585,6 +592,39 @@ export default function StaffDashboard() {
     setSearchTerm("");
   };
 
+  // --- NEW LOGIC FOR VENUE FILTERING AND PAGINATION ---
+  const { paginatedVenues, totalPages } = useMemo(() => {
+    // 1. Filtering
+    const lowercasedSearchTerm = searchTermVenue.toLowerCase();
+    const filtered = venues.filter(
+      (v) =>
+        v.name.toLowerCase().includes(lowercasedSearchTerm) ||
+        v.centerHead.toLowerCase().includes(lowercasedSearchTerm) ||
+        v.address.toLowerCase().includes(lowercasedSearchTerm)
+    );
+
+    // 2. Pagination Calculation
+    const total = filtered.length;
+    const pages = Math.ceil(total / VENUES_PER_PAGE);
+
+    // Correct the current page if it's out of bounds after filtering
+    const pageIndex = Math.max(0, currentPage - 1);
+    const start = pageIndex * VENUES_PER_PAGE;
+    const end = start + VENUES_PER_PAGE;
+
+    // 3. Slicing
+    const paginated = filtered.slice(start, end);
+
+    // If the current page is now empty after filtering, go back one page (unless it's the first page)
+    if (paginated.length === 0 && currentPage > 1) {
+        setCurrentPage(Math.max(1, currentPage - 1));
+    }
+
+    return { paginatedVenues: paginated, totalPages: pages };
+  }, [venues, searchTermVenue, currentPage]);
+  // --- END NEW LOGIC ---
+
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="bg-primary text-primary-foreground p-6 rounded-xl flex justify-between items-center">
@@ -598,7 +638,6 @@ export default function StaffDashboard() {
           variant="secondary"
           className="text-primary hover:bg-white/90"
           onClick={() => {
-            // Assuming '/' is the home page. Use router.push('/') in a real app.
             console.log("Navigating to Home Page");
             window.location.href = "/staff";
           }}
@@ -614,7 +653,6 @@ export default function StaffDashboard() {
           <TabsTrigger value="venues">Venue Management</TabsTrigger>
         </TabsList>
 
-        {/* Assigned Players Tab */}
         <TabsContent value="Assigned" className="space-y-6">
           <Card>
             <CardHeader>
@@ -707,33 +745,26 @@ export default function StaffDashboard() {
                                 : "No players found."}
                             </div>
                           ) : (
-                            filteredPlayers.map(
-                              (
-                                player 
-                              ) => (
-                                <div
-                                  key={player.id}
-                                  className="flex items-center space-x-2 py-1"
+                            filteredPlayers.map((player) => (
+                              <div
+                                key={player.id}
+                                className="flex items-center space-x-2 py-1"
+                              >
+                                <Checkbox
+                                  id={`player-${player.id}`}
+                                  checked={selectedPlayers.includes(player.id)}
+                                  onCheckedChange={() =>
+                                    handlePlayerCheckboxChange(player.id)
+                                  }
+                                />
+                                <Label
+                                  htmlFor={`player-${player.id}`}
+                                  className="text-sm font-normal cursor-pointer flex-1"
                                 >
-                                  <Checkbox
-                                    id={`player-${player.id}`}
-                                    checked={selectedPlayers.includes(
-                                      player.id
-                                    )}
-                                    onCheckedChange={() =>
-                                      handlePlayerCheckboxChange(player.id)
-                                    }
-                                  />
-                                  <Label
-                                    htmlFor={`player-${player.id}`}
-                                    className="text-sm font-normal cursor-pointer flex-1"
-                                  >
-                                    {player.name} (Coach: {player.coach_name}){" "}
-                                    
-                                  </Label>
-                                </div>
-                              )
-                            )
+                                  {player.name} (Coach: {player.coach_name}){" "}
+                                </Label>
+                              </div>
+                            ))
                           )}
                         </div>
                       </ScrollArea>
@@ -876,10 +907,9 @@ export default function StaffDashboard() {
           {/* --- End Player List Section --- */}
         </TabsContent>
 
-        {/* Venues Tab (Venue Management) */}
         <TabsContent value="venues">
           <Card>
-            <CardHeader className="flex flex-row justify-between items-center">
+            <CardHeader className="flex flex-row justify-between items-start">
               <div>
                 <CardTitle>Venue Management</CardTitle>
 
@@ -982,7 +1012,9 @@ export default function StaffDashboard() {
                       const firstSlot = dayEntry.slots[0];
 
                       // FIX 3: Check for both 'Open Day' and 'Enter Hours' status to display slots
-                      const isDayOpen = dayEntry.status === "Open Day" || dayEntry.status === "Enter Hours";
+                      const isDayOpen =
+                        dayEntry.status === "Open Day" ||
+                        dayEntry.status === "Enter Hours";
 
                       return (
                         <div
@@ -1010,7 +1042,7 @@ export default function StaffDashboard() {
                                 <SelectValue placeholder="Status" />
                               </SelectTrigger>
 
-                              <SelectContent>    
+                              <SelectContent>
                                 <SelectItem value="Open Day">
                                   Open Day
                                 </SelectItem>
@@ -1200,126 +1232,175 @@ export default function StaffDashboard() {
               {/* VENUE LIST DISPLAY */}
 
               <div className="space-y-3 mt-6">
-                {venues.length === 0 && (
+                {/* --- VENUE SEARCH INPUT --- */}
+                <Input
+                  placeholder="Search venues by name, head, or address..."
+                  className="mb-4"
+                  value={searchTermVenue}
+                  onChange={(e) => {
+                    setSearchTermVenue(e.target.value);
+                    setCurrentPage(1); // Reset to first page on new search
+                  }}
+                />
+                {/* --- END SEARCH INPUT --- */}
+
+                {venues.length === 0 ? (
                   <div className="text-center p-6 opacity-70 border rounded">
                     <MapPin className="mx-auto mb-2 h-6 w-6" />
                     No venues added yet.
                   </div>
-                )}
+                ) : paginatedVenues.length === 0 ? (
+                  <div className="text-center p-6 opacity-70 border rounded">
+                    <MapPin className="mx-auto mb-2 h-6 w-6" />
+                    No venues match your search criteria.
+                  </div>
+                ) : (
+                  paginatedVenues.map((v) => {
+                    const groupedHours = v.operatingHours.reduce((acc, slot) => {
+                      const day = slot.day || "Unknown Day";
 
-                {venues.map((v) => {
-                  const groupedHours = v.operatingHours.reduce((acc, slot) => {
-                    const day = slot.day || "Unknown Day";
-
-                    // Ensure we have valid time data before grouping (already filtered in loadVenues, but good for robustness)
-                    if (slot.startTime && slot.endTime) {
-                      if (!acc[day]) {
-                        acc[day] = [];
+                      // Ensure we have valid time data before grouping (already filtered in loadVenues, but good for robustness)
+                      if (slot.startTime && slot.endTime) {
+                        if (!acc[day]) {
+                          acc[day] = [];
+                        }
+                        acc[day].push(slot);
                       }
-                      acc[day].push(slot);
-                    }
-                    return acc;
-                  }, {});
+                      return acc;
+                    }, {});
 
-                  // Count the total number of valid slots across all days
-                  const totalValidSlots =
-                    Object.values(groupedHours).flat().length;
+                    // Get all days to render (all 7 fixed days + any unknown days)
+                    const daysToRender = [
+                      ...weekDays,
+                      ...Object.keys(groupedHours).filter(
+                        (day) => !weekDays.includes(day)
+                      ),
+                    ];
 
-                  // Get all days to render (all 7 fixed days + any unknown days)
-                  const daysToRender = [...weekDays, ...Object.keys(groupedHours).filter(day => !weekDays.includes(day))];
+                    return (
+                      <Card key={v.id} className="shadow-sm">
+                        <CardHeader className="flex flex-row justify-between items-start space-y-0">
+                          <div>
+                            <CardTitle>{v.name}</CardTitle>
 
-                  return (
-                    <Card key={v.id} className="shadow-sm">
-                      <CardHeader className="flex flex-row justify-between items-start space-y-0">
-                        <div>
-                          <CardTitle>{v.name}</CardTitle>
-
-                          <CardDescription>
-                            Center Head: {v.centerHead}
-                          </CardDescription>
-                        </div>
-
-                        <Button
-                          variant="ghost"
-                          onClick={() => handleDeleteVenue(v.id)}
-                        >
-                          Delete
-                        </Button>
-                      </CardHeader>
-
-                      <CardContent>
-                        {/* Address */}
-
-                        <p className="text-sm opacity-70 mb-2">Address:</p>
-
-                        <p className="text-sm mb-4">{v.address}</p>
-
-                        {/* Google Maps Link */}
-
-                        {v.googleMapsUrl && (
-                          <div className="mb-4">
-                            <p className="text-sm opacity-70 mb-1">
-                              Google Maps Link:
-                            </p>
-
-                            <a
-                              href={v.googleMapsUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-blue-600 hover:underline truncate block"
-                            >
-                              {v.googleMapsUrl}
-                            </a>
+                            <CardDescription>
+                              Center Head: {v.centerHead}
+                            </CardDescription>
                           </div>
-                        )}
 
-                        {/* Operating Hours Display (Updated logic) */}
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleDeleteVenue(v.id)}
+                            className="text-red-600 hover:bg-red-50"
+                          >
+                            Delete
+                          </Button>
+                        </CardHeader>
 
-                        <p className="text-sm font-medium mb-2">
-                          Operating Hours:
-                        </p>
+                        <CardContent>
+                          {/* Address */}
 
-                        <div className="space-y-2">
-                          {daysToRender.length > 0 ? (
-                            daysToRender.map((day) => {
-                              const slots = groupedHours[day];
+                          <p className="text-sm opacity-70 mb-2">Address:</p>
 
-                              return (
-                                <div
-                                  key={day}
-                                  className="p-3 border rounded bg-secondary/20"
-                                >
-                                  <div className="flex items-center gap-2 font-bold mb-1">
-                                    <Clock className="text-primary h-4 w-4" />
+                          <p className="text-sm mb-4">{v.address}</p>
 
-                                    <span>{day}</span>
-                                  </div>
+                          {/* Google Maps Link */}
 
-                                  <div className="pl-6 space-y-1 text-sm">
-                                    {slots && slots.length > 0 ? (
-                                      slots.map((slot, idx) => (
-                                        <div key={idx}>
-                                          {slot.startTime} - {slot.endTime}
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <p className="opacity-70">Closed</p>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <p className="text-sm opacity-70">
-                              No operating hours defined.
-                            </p>
+                          {v.googleMapsUrl && (
+                            <div className="mb-4">
+                              <p className="text-sm opacity-70 mb-1">
+                                Google Maps Link:
+                              </p>
+
+                              <a
+                                href={v.googleMapsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-600 hover:underline truncate block"
+                              >
+                                {v.googleMapsUrl}
+                              </a>
+                            </div>
                           )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+
+                          {/* Operating Hours Display (Updated logic) */}
+
+                          <p className="text-sm font-medium mb-2">
+                            Operating Hours:
+                          </p>
+
+                          <div className="space-y-2">
+                            {daysToRender.length > 0 ? (
+                              daysToRender.map((day) => {
+                                const slots = groupedHours[day];
+
+                                return (
+                                  <div
+                                    key={day}
+                                    className="p-3 border rounded bg-secondary/20"
+                                  >
+                                    <div className="flex items-center gap-2 font-bold mb-1">
+                                      <Clock className="text-primary h-4 w-4" />
+
+                                      <span>{day}</span>
+                                    </div>
+
+                                    <div className="pl-6 space-y-1 text-sm">
+                                      {slots && slots.length > 0 ? (
+                                        slots.map((slot, idx) => (
+                                          <div key={idx}>
+                                            {slot.startTime} - {slot.endTime}
+                                          </div>
+                                        ))
+                                      ) : (
+                                        <p className="opacity-70">Closed</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <p className="text-sm opacity-70">
+                                No operating hours defined.
+                              </p>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                )}
               </div>
+
+              {/* --- PAGINATION CONTROLS --- */}
+              {totalPages > 1 && (
+                <div className="flex justify-between items-center mt-6 p-3 border-t">
+                  <p className="text-sm opacity-70">
+                    Page {currentPage} of {totalPages}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                      }
+                      disabled={currentPage === totalPages}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {/* --- END PAGINATION CONTROLS --- */}
             </CardContent>
           </Card>
         </TabsContent>

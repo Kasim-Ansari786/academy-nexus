@@ -12,7 +12,7 @@ import {
   Eye,
 } from "lucide-react";
 // Ensure uploadRegistrations and GetregistrationsData are correctly imported
-import { GetregistrationsData, uploadRegistrations, updateRegistrationData } from "../../../api";
+import { GetregistrationsData, uploadRegistrations, updateRegistrationData, deleteRegistration } from "../../../api";
 
 import {
   Table,
@@ -38,6 +38,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+// You might need to import a Select component for better styling.
+// For simplicity, this example uses a basic <select> element in the JSX.
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+
 // Set the number of records to display per page
 const RECORDS_PER_PAGE = 8;
 
@@ -46,6 +51,9 @@ const PendingRegistrations = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  // NEW STATE: Filter by Status
+  const [filterStatus, setFilterStatus] = useState("All"); 
+
   const fileInputRef = useRef(null);
   const { toast } = useToast();
 
@@ -68,6 +76,7 @@ const handleApprove = async () => {
 
     try {
       setIsLoading(true);
+      // Assuming updateRegistrationData handles Status updates for Approval
       await updateRegistrationData(selectedRegistration.id, "Approved");
 
       toast({
@@ -76,7 +85,7 @@ const handleApprove = async () => {
         variant: "success",
       });
       
-      // Close dialog and refresh data to remove the approved item
+      // Close dialog and refresh data 
       setIsDialogOpen(false);
       setSelectedRegistration(null);
       await fetchRegistrations(); 
@@ -92,12 +101,13 @@ const handleApprove = async () => {
     }
   };
 
-  // FIX: Implemented handleReject with API call
+  // FIX: Implemented handleReject with API call (using updateRegistrationData for status change)
   const handleReject = async () => {
     if (!selectedRegistration) return;
 
     try {
       setIsLoading(true);
+      // Assuming updateRegistrationData handles Status updates for Rejection
       await updateRegistrationData(selectedRegistration.id, "Rejected");
 
       toast({
@@ -106,7 +116,7 @@ const handleApprove = async () => {
         variant: "destructive",
       });
 
-      // Close dialog and refresh data to remove the rejected item
+      // Close dialog and refresh data
       setIsDialogOpen(false);
       setSelectedRegistration(null);
       await fetchRegistrations();
@@ -128,6 +138,8 @@ const handleApprove = async () => {
   const fetchRegistrations = async () => {
     setIsLoading(true);
     setCurrentPage(1);
+    // Reset filter when fetching fresh data
+    setFilterStatus("All"); 
 
     try {
       const response = await GetregistrationsData();
@@ -394,6 +406,7 @@ const handleApprove = async () => {
       Age: reg.age,
       Application_Date: reg.applicationDate,
       Parent_Name: reg.parentName,
+      Status: reg.Status, // Include Status in export
     }));
 
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -407,34 +420,73 @@ const handleApprove = async () => {
   };
 
   // ----------------------------------------------------
-  // DELETE (No change needed)
+  // DELETE (Rejection API call is performed here)
   // ----------------------------------------------------
-  const handleDelete = (id) => {
-    setRegistrations((prev) => prev.filter((r) => r.id !== id));
-    // Re-check if the current page is valid after deletion
-    if (
-      filteredRegistrations.length - 1 <=
-        (currentPage - 1) * RECORDS_PER_PAGE &&
-      currentPage > 1
-    ) {
-      setCurrentPage((prev) => prev - 1);
+const handleDelete = async (id) => {
+    try {
+      // API call to delete/reject the registration
+      await deleteRegistration(id);
+      
+      // Update local state by filtering out the rejected item
+      setRegistrations((prev) => prev.filter((r) => r.id !== id));
+      
+      // Calculate total items after deletion based on the current filtered list
+      const totalItemsAfterDeletion = filteredRegistrations.length - 1;
+
+      // Adjust pagination if the current page is now empty
+      if (
+        totalItemsAfterDeletion <= (currentPage - 1) * RECORDS_PER_PAGE &&
+        currentPage > 1
+      ) {
+        setCurrentPage((prev) => prev - 1);
+      }
+      
+      toast({
+        title: "Success",
+        description: `Registration ${id} successfully rejected and removed.`,
+      });
+
+    } catch (error) {
+      console.error("Deletion failed:", error.message);
+      toast({
+        title: "Error",
+        description: `Failed to reject registration ${id}.`,
+        variant: "destructive",
+      });
     }
   };
 
   // ----------------------------------------------------
-  // SEARCH
+  // SEARCH & FILTER LOGIC
   // ----------------------------------------------------
   const handleSearchChange = (e) => {
     setSearchQuery(e.target.value);
     // Reset to the first page on every search
     setCurrentPage(1);
   };
+  
+  // NEW: Handle status filter change
+  const handleFilterStatusChange = (e) => {
+    setFilterStatus(e.target.value);
+    setCurrentPage(1); // Reset to the first page when changing filters
+  }
+
 
   const filteredRegistrations = registrations.filter(
-    (reg) =>
-      reg.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      reg.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      reg.phoneNumber.includes(searchQuery)
+    (reg) => {
+      // 1. Search Filter
+      const searchMatch = 
+        reg.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        reg.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        reg.phoneNumber.includes(searchQuery);
+
+      // 2. Status Filter
+      const statusMatch = 
+        filterStatus === 'All' || 
+        reg.Status === filterStatus;
+
+      return searchMatch && statusMatch;
+    }
   );
 
   // ----------------------------------------------------
@@ -459,11 +511,11 @@ const handleApprove = async () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>📋 Pending Registrations</CardTitle>
+        <CardTitle>📋 Registration Management</CardTitle>
       </CardHeader>
 
       <CardContent>
-        {/* SEARCH + IMPORT + EXPORT */}
+        {/* SEARCH + FILTER + IMPORT + EXPORT */}
         <div className="flex gap-4 mb-6">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -474,6 +526,20 @@ const handleApprove = async () => {
               className="pl-10"
             />
           </div>
+          
+          {/* NEW: Status Filter Select */}
+          {/* NOTE: You should ideally replace this with the <Select> component from shadcn/ui */}
+          <select 
+              value={filterStatus} 
+              onChange={handleFilterStatusChange}
+              className="border rounded-md px-4 py-2 text-sm bg-background shadow-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+              <option value="All">All Statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Approved">Approved</option>
+              <option value="Rejected">Rejected</option>
+          </select>
+
 
           <input
             ref={fileInputRef}
@@ -517,7 +583,7 @@ const handleApprove = async () => {
           </div>
         ) : filteredRegistrations.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground border rounded-lg">
-            <p>No registrations found</p>
+            <p>No registrations found with the current filter/search</p>
           </div>
         ) : (
           <>
@@ -525,7 +591,7 @@ const handleApprove = async () => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {/* NEW: Serial Number Column Header */}
+                    {/* Serial Number Column Header */}
                     <TableHead className="w-[50px]">Sr/No</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Phone</TableHead>
@@ -543,7 +609,7 @@ const handleApprove = async () => {
                   {/* Use paginatedRegistrations here */}
                   {paginatedRegistrations.map((reg, index) => (
                     <TableRow key={reg.id ?? `${reg.email}-${index}`}>
-                      {/* NEW: Serial Number Cell */}
+                      {/* Serial Number Cell */}
                       <TableCell className="font-medium">
                         {startIndex + index + 1}
                       </TableCell>
@@ -560,7 +626,7 @@ const handleApprove = async () => {
                             <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
                                 reg.Status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
                                 reg.Status === 'Approved' ? 'bg-green-100 text-green-800' :
-                                'bg-gray-100 text-gray-800'
+                                'bg-red-100 text-red-800' // Use red for rejected
                             }`}>
                                 {reg.Status}
                             </span>
@@ -572,17 +638,21 @@ const handleApprove = async () => {
                           variant="outline"
                           size="icon"
                           onClick={() => handleViewDetails(reg.id)}
+                          className="mr-2"
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
 
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(reg.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
+                        {/* Only show Trash icon if status is not Approved */}
+                        {reg.Status !== 'Approved' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(reg.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -620,8 +690,7 @@ const handleApprove = async () => {
         )}
         {registrations.length > 0 && (
           <div className="mt-4 text-sm text-muted-foreground">
-            Showing {filteredRegistrations.length} of {registrations.length}{" "}
-            registrations
+            Showing {filteredRegistrations.length} records based on filter and search.
           </div>
         )}
 
@@ -678,10 +747,18 @@ const handleApprove = async () => {
               </div>
             )}
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button variant="destructive" onClick={handleReject}>
+              <Button 
+                variant="destructive" 
+                onClick={handleReject}
+                disabled={isLoading} // Disable while processing
+              >
                 Reject
               </Button>
-              <Button variant="default" onClick={handleApprove}>
+              <Button 
+                variant="default" 
+                onClick={handleApprove}
+                disabled={isLoading} // Disable while processing
+              >
                 Approve
               </Button>
             </DialogFooter>

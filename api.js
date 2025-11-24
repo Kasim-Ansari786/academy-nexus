@@ -763,8 +763,8 @@ export const deleteRegistration = async (registId) => {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-      },      
-      body: JSON.stringify({ id: registId }), 
+      },
+      body: JSON.stringify({ id: registId }),
     });
 
     const data = await response.json();
@@ -772,7 +772,7 @@ export const deleteRegistration = async (registId) => {
     if (!response.ok) {
       throw new Error(data.error || data.message || "Failed to reject registration.");
     }
-    
+
     return data;
 
   } catch (error) {

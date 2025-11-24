@@ -1522,19 +1522,19 @@ app.put('/api/registrations/reject', async (req, res) => {
 
   try {
     const queryText = `
-      UPDATE cd.registrations_details 
-      SET active = false, Status = 'Rejected' 
+      UPDATE cd.registrations_details
+      SET active = false, Status = 'Rejected'
       WHERE regist_id = $1
       RETURNING *;
-    `;   
-    
+    `;
+
     const result = await pool.query(queryText, [id]);
 
     if (result.rowCount === 0) {
       return res.status(404).json({ message: `Registration with ID ${id} not found.` });
     }
-   
-    res.status(200).json({ 
+
+    res.status(200).json({
       message: 'Registration successfully rejected.',
       rejectedRegistration: result.rows[0]
     });
