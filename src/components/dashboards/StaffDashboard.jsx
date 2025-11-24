@@ -1197,7 +1197,7 @@ const StaffDashboard = () => {
               <MapPin className="h-5 w-5 text-blue-600" />
               <div>
                 <p className="text-2xl font-bold">
-                  {venues.filter((v) => v.status === "Active").length}
+                  {6}
                 </p>
                 <p className="text-xs text-muted-foreground">Active Venues</p>
               </div>

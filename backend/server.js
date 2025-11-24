@@ -1526,8 +1526,7 @@ app.put('/api/registrations/reject', async (req, res) => {
       SET active = false, Status = 'Rejected' 
       WHERE regist_id = $1
       RETURNING *;
-    `;
-    
+    `;   
     
     const result = await pool.query(queryText, [id]);
 
