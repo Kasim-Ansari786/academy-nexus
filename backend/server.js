@@ -10,7 +10,9 @@ import jwt from "jsonwebtoken";
 const { Pool } = pg;
 
 const app = express();
-const PORT = 3001;
+//const PORT = 3001;
+
+const PORT = process.env.PORT || 5000;
 
 // ---------------------------------------------
 // DB CONNECTION
