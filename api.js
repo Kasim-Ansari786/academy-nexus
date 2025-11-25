@@ -59,29 +59,37 @@ const handleApiCall = async (url, options = {}) => {
   }
 };
 
-export const signupUser = async ({ name, email, password, role }) => {
+export const loginUser = async ({ email, password, role }) => {
   try {
-    const response = await fetch(`${API_URL}/api/signup`, {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password, role }),
+      body: JSON.stringify({ email, password, role }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      return { data: null, error: data.error || "Signup failed." };
+      return { data: null, error: data.error || "Login failed." };
     }
 
-    return { data, error: null };
+    return {
+      data: {
+        user: data.user,
+        token: data.token,
+        role: data.user.role,
+      },
+      error: null,
+    };
   } catch (err) {
-    console.error("API Error (Signup):", err);
+    console.error("API Error (Login):", err);
     return {
       data: null,
-      error: "Could not connect to the server. Make sure backend is running.",
+      error: "Could not connect to the server.",
     };
   }
 };
+
 
 export const loginUser = async ({ email, password, role }) => {
   try {
