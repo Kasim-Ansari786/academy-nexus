@@ -31,6 +31,16 @@ import jwt from "jsonwebtoken";
 
 const { Pool } = pg;
 const app = express();
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://academy-nexus-xi.vercel.app",
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
 
 const PORT = process.env.PORT || 5000;
 
@@ -45,6 +55,10 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
   // Add SSL connection options for production environments like Render/Heroku
   // ssl: { rejectUnauthorized: false } 
+});
+
+app.get("/", (req, res) => {
+  res.send("Backend is running ✔");
 });
 
 // ---------------------------------------------
