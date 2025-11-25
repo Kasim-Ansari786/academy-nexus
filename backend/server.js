@@ -137,34 +137,41 @@ const authenticateToken = (req, res, next) => {
 // ---------------------------------------------
 // SIGNUP
 // ---------------------------------------------
-app.post("/api/signup", async (req, res) => {
-  const { email, password, name, role } = req.body;
-
-  if (!email || !password || !name || !role) {
-    return res.status(400).json({ error: "Missing required fields for signup." });
-  }
-
+app.post("/auth/login", async (req, res) => {
   try {
-    const hash = await bcrypt.hash(password, 10);
+    const { email, password, role } = req.body;
+
+    if (!email || !password || !role) {
+      return res.status(400).json({ error: "All fields are required." });
+    }
+
     const result = await pool.query(
-      `
-      INSERT INTO cd.users_login (full_name, email, password_hash, role)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, email, role;
-      `,
-      [name, email, hash, role]
+      `SELECT * FROM cd.users_login 
+       WHERE email = $1 AND password = $2 AND role = $3 AND active = TRUE 
+       LIMIT 1`,
+      [email, password, role]
     );
 
-    res.status(201).json({ message: "Success", user: result.rows[0] });
-  } catch (error) {
-    if (error.code === '23505') { // PostgreSQL unique violation error
-        return res.status(409).json({ error: "Email already registered." });
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials." });
     }
-    console.error("Signup failed:", error);
-    res.status(500).json({ error: "Signup failed due to internal error" });
+
+    const user = result.rows[0];
+
+    res.status(200).json({
+      message: "Login successful",
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      },
+      token: "NO_JWT_YET", // Add JWT later if needed
+    });
+  } catch (err) {
+    console.log("❌ Login API Error:", err);
+    res.status(500).json({ error: "Server Error During Login" });
   }
 });
-
 // ---------------------------------------------
 // LOGIN (CORRECT ENDPOINT: /api/login)
 // ---------------------------------------------
