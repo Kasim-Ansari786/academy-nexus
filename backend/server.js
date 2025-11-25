@@ -35,12 +35,14 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "https://academy-nexus-xi.vercel.app",
+      "https://academy-nexus-git-main-kasim3.vercel.app",
+      "https://academy-nexus-xi.vercel.app"
     ],
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: "GET,POST,PUT,DELETE",
     credentials: true,
   })
 );
+
 
 const PORT = process.env.PORT || 5000;
 
