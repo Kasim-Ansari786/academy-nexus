@@ -1,5 +1,6 @@
 // api.js
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = "http://localhost:5000";
+
 
 import axios from "axios";
 //import jwt from "jsonwebtoken";
@@ -59,37 +60,29 @@ const handleApiCall = async (url, options = {}) => {
   }
 };
 
-export const loginUser = async ({ email, password, role }) => {
+export const signupUser = async ({ name, email, password, role }) => {
   try {
-    const response = await fetch(`${API_URL}/auth/login`, {
+    const response = await fetch(`${API_URL}/api/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, role }),
+      body: JSON.stringify({ name, email, password, role }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      return { data: null, error: data.error || "Login failed." };
+      return { data: null, error: data.error || "Signup failed." };
     }
 
-    return {
-      data: {
-        user: data.user,
-        token: data.token,
-        role: data.user.role,
-      },
-      error: null,
-    };
+    return { data, error: null };
   } catch (err) {
-    console.error("API Error (Login):", err);
+    console.error("API Error (Signup):", err);
     return {
       data: null,
-      error: "Could not connect to the server.",
+      error: "Could not connect to the server. Make sure backend is running.",
     };
   }
 };
-
 
 export const loginUser = async ({ email, password, role }) => {
   try {
