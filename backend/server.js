@@ -1,19 +1,3 @@
-/**
- * You must create a .env file in your root directory with these variables:
- *
- * .env content example:
- * NODE_ENV=development
- * PORT=5000
- * DB_USER=postgres
- * DB_HOST=localhost
- * DB_DATABASE=admincomdata
- * DB_PASSWORD=Admin@123
- * DB_PORT=5432
- * JWT_SECRET=YOUR_VERY_STRONG_SECRET_KEY
- * * NOTE: For deployment (e.g., Render/Vercel), you must update these
- * variables in the platform's settings.
- */
-
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcrypt";
@@ -23,115 +7,70 @@ import path from "path";
 import fs from "fs";
 import jwt from "jsonwebtoken";
 
-// For production-ready code, you should use dotenv to load environment variables
-// from a .env file locally.
-// import dotenv from 'dotenv';
-// dotenv.config(); 
-// The code below assumes process.env variables are set.
-
 const { Pool } = pg;
+
 const app = express();
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "https://academy-nexus-git-main-kasim3.vercel.app",
-      "https://academy-nexus-xi.vercel.app"
-    ],
-    methods: "GET,POST,PUT,DELETE",
-    credentials: true,
-  })
-);
 
 
 const PORT = process.env.PORT || 5000;
 
 // ---------------------------------------------
-// SECURE DB CONNECTION
+// DB CONNECTION
 // ---------------------------------------------
 const pool = new Pool({
-  user: process.env.DB_USER || "postgres",
-  host: process.env.DB_HOST || "localhost",
-  database: process.env.DB_DATABASE || "admincomdata",
-  password: process.env.DB_PASSWORD || "Admin@123", // **MUST BE SECURED**
-  port: process.env.DB_PORT || 5432,
-  // Add SSL connection options for production environments like Render/Heroku
-  // ssl: { rejectUnauthorized: false } 
+  user: "postgres",
+  host: "localhost",
+  database: "admincomdata",
+  password: "Admin@123",
+  port: 5432,
 });
-
-app.get("/", (req, res) => {
-  res.send("Backend is running ✔");
-});
-
-// ---------------------------------------------
-// CONFIGURATION & MIDDLEWARE
-// ---------------------------------------------
-const JWT_SECRET = process.env.JWT_SECRET || "SECRET_KEY"; // **MUST BE SECURED**
-
-// Use express.json() for parsing application/json. THIS IS CRUCIAL.
-app.use(express.json()); 
-app.use(express.urlencoded({ extended: true }));
-
-// Configure CORS
-const allowedOrigins = [
-    "http://localhost:3000", 
-    "http://localhost:8080"
-];
-
+const JWT_SECRET = "SECRET_KEY";
 app.use(
   cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true); 
-        if (allowedOrigins.indexOf(origin) === -1) {
-          const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-          return callback(new Error(msg), false);
-        }
-        return callback(null, true);
-    },
+    origin: ["http://localhost:3000", "http://localhost:8080"],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
 );
 
+app.use(express.json());
 
 // ---------------------------------------------
-// CREATE UPLOADS FOLDER & SERVE STATIC FILES
+// CREATE UPLOADS FOLDER (FIXED LOCATION)
 // ---------------------------------------------
-const UPLOAD_DIR = path.resolve("uploads");
+const UPLOAD_DIR = path.resolve("uploads"); // <-- UPLOAD_DIR DEFINED HERE
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
   console.log("✔ Uploads folder created:", UPLOAD_DIR);
 }
 
+// ---------------------------------------------
+// SERVE STATIC UPLOADS (UPLOAD_DIR IS NOW READY)
+// ---------------------------------------------
 app.use("/uploads", express.static(UPLOAD_DIR));
 
 // ---------------------------------------------
-// MULTER STORAGE CONFIGURATION
+// MULTER STORAGE
 // ---------------------------------------------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, UPLOAD_DIR);
   },
+
   filename: (req, file, cb) => {
     const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
     cb(null, file.fieldname + "-" + unique + path.extname(file.originalname));
   },
 });
 
-const upload = multer({ 
-    storage,
-    limits: { fileSize: 1024 * 1024 * 5 }, // Limit file size to 5MB
-}).fields([
+// These names must match your React formData keys EXACTLY
+const upload = multer({ storage }).fields([
   { name: "profile_photo_path", maxCount: 1 },
   { name: "aadhar_upload_path", maxCount: 1 },
   { name: "birth_certificate_path", maxCount: 1 },
 ]);
 
-// ---------------------------------------------
-// JWT AUTHENTICATION MIDDLEWARE
-// ---------------------------------------------
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -140,11 +79,8 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: "Access Denied: No Token Provided" });
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      // Log for debugging: console.error("JWT Verification Error:", err.message);
-      // This covers expired tokens, invalid signatures, etc.
-      return res.status(403).json({ error: "Access Denied: Invalid or Expired Token" }); 
-    }
+    if (err)
+      return res.status(403).json({ error: "Access Denied: Invalid Token" }); // <-- This is where the error originates
     req.user = user;
     next();
   });
@@ -153,47 +89,33 @@ const authenticateToken = (req, res, next) => {
 // ---------------------------------------------
 // SIGNUP
 // ---------------------------------------------
-app.post("/auth/login", async (req, res) => {
+app.post("/api/signup", async (req, res) => {
+  const { email, password, name, role } = req.body;
+
   try {
-    const { email, password, role } = req.body;
-
-    if (!email || !password || !role) {
-      return res.status(400).json({ error: "All fields are required." });
-    }
-
+    const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      `SELECT * FROM cd.users_login 
-       WHERE email = $1 AND password = $2 AND role = $3 AND active = TRUE 
-       LIMIT 1`,
-      [email, password, role]
+      `
+      INSERT INTO cd.users_login (full_name, email, password_hash, role)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, email, role;
+      `,
+      [name, email, hash, role]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: "Invalid credentials." });
-    }
-
-    const user = result.rows[0];
-
-    res.status(200).json({
-      message: "Login successful",
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-      },
-      token: "NO_JWT_YET", // Add JWT later if needed
-    });
-  } catch (err) {
-    console.log("❌ Login API Error:", err);
-    res.status(500).json({ error: "Server Error During Login" });
+    res.status(201).json({ message: "Success", user: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: "Signup failed" });
   }
 });
+
 // ---------------------------------------------
-// LOGIN (CORRECT ENDPOINT: /api/login)
+// LOGIN
 // ---------------------------------------------
+// server.js (or login route file)
+
 app.post("/api/login", async (req, res) => {
   const { email, password, role } = req.body;
-  
   if (!email || !password || !role) {
     return res.status(400).json({ error: "Missing email, password, or role." });
   }
@@ -209,18 +131,13 @@ app.post("/api/login", async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password." });
     }
-    
     const match = await bcrypt.compare(password, user.password_hash);
-    
     if (!match) {
       return res.status(401).json({ error: "Invalid email or password." });
     }
-    
     if (user.role !== role) {
       return res.status(403).json({ error: "Access denied for this role." });
     }
-    
-    // Generate JWT
     const token = jwt.sign(
       {
         id: user.id,
@@ -250,36 +167,31 @@ app.post("/api/login", async (req, res) => {
       .json({ error: "Internal Server Error during login process." });
   }
 });
-
 // ---------------------------------------------
-// PLAYER ROUTES
-// ---------------------------------------------
-
 // GET PLAYERS
+// ---------------------------------------------
 app.get("/api/players-details", async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, player_id, name, age, address, phone_no, center_name, coach_name, category, status
       FROM cd.player_details 
-      ORDER BY id DESC;
+      ORDER BY id,player_id DESC;
     `);
 
     res.json(result.rows);
-  } catch(error) {
-    console.error("Error fetching player details:", error);
+  } catch {
     res.status(500).json({ error: "Fetch failed" });
   }
 });
 
-// ADD PLAYER (Handles file upload)
+// ---------------------------------------------
+// ADD PLAYER (FIXED)
+// ---------------------------------------------
 app.post("/api/players-add", (req, res) => {
   upload(req, res, async (err) => {
-    if (err instanceof multer.MulterError) {
-      return res.status(400).json({ error: `File upload failed: ${err.code}` });
-    }
     if (err) {
       console.log("❌ Multer upload error:", err);
-      return res.status(500).json({ error: "File upload failed" });
+      return res.status(400).json({ error: "File upload failed" });
     }
 
     const filePath = (field) => {
@@ -294,12 +206,8 @@ app.post("/api/players-add", (req, res) => {
     const birth_certificate_path = filePath("birth_certificate_path");
 
     const data = req.body;
-    const numericAge = Number(data.age) || null;
 
-    // Check for mandatory fields before DB insert
-    if (!data.name || !data.email_id || !data.phone_no) {
-        return res.status(400).json({ error: "Missing mandatory fields (name, email_id, phone_no)." });
-    }
+    const numericAge = Number(data.age) || null;
 
     try {
       const query = `
@@ -307,10 +215,93 @@ app.post("/api/players-add", (req, res) => {
           name, age, address, father_name, mother_name, gender, 
           date_of_birth, blood_group, email_id, emergency_contact_number, 
           guardian_contact_number, guardian_email_id, medical_condition, 
-          aadhar_upload_path, birth_certificate_path, profile_photo_path, phone_no,
-          active, status
+          aadhar_upload_path, birth_certificate_path, profile_photo_path, phone_no
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, TRUE, 'Active'
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
+        )
+        RETURNING player_id, name; 
+      `;
+     
+      const result = await pool.query(query, [
+        data.name, 
+        numericAge, 
+        data.address, 
+        
+        data.father_name, 
+        data.mother_name, 
+        data.gender, 
+        data.date_of_birth, 
+        data.blood_group, 
+        data.email_id,
+        
+        data.emergency_contact_number, 
+        data.guardian_contact_number, 
+        data.guardian_email_id, 
+        
+        data.medical_condition,
+        
+        aadhar_upload_path, 
+        birth_certificate_path, 
+        profile_photo_path, 
+        
+        data.phone_no, 
+      ]);
+
+      res.status(201).json({
+        message: "Player added successfully",
+        player: result.rows[0],
+      });
+    } catch (error) {
+      console.error("❌ Database insert failed:", error.message, error.detail);
+
+      if (error.code === "23505") {
+        return res.status(409).json({
+          error: `A player with this email address already exists.`,
+          details: error.detail,
+        });
+      }
+      
+      res.status(500).json({
+        error: "Internal Server Error: Database insertion failed.",
+        details: error.message,
+      });
+    }
+  });
+});
+
+//coach list by the add players coact name list
+app.post("/api/players-add", (req, res) => {
+  upload(req, res, async (err) => {
+    if (err) {
+      console.log("❌ Multer upload error:", err);
+      return res.status(400).json({ error: "File upload failed" });
+    }
+
+    // CORRECT: Logic to extract file paths saved in the 'uploads' folder
+    const filePath = (field) => {
+      if (req.files && req.files[field] && req.files[field].length > 0) {
+        return `/uploads/${req.files[field][0].filename}`; 
+      }
+      return null;
+    };
+
+    const profile_photo_path = filePath("profile_photo_path");
+    const aadhar_upload_path = filePath("aadhar_upload_path");
+    const birth_certificate_path = filePath("birth_certificate_path");
+
+    const data = req.body;
+
+    const numericAge = Number(data.age) || null;
+
+    try {
+      const query = `
+        INSERT INTO cd.player_details (
+          name, age, address, father_name, mother_name, gender, 
+          date_of_birth, blood_group, email_id, emergency_contact_number, 
+          guardian_contact_number, guardian_email_id, medical_condition, 
+          aadhar_upload_path, birth_certificate_path, profile_photo_path, phone_no
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
         )
         RETURNING player_id, name; 
       `;
@@ -341,8 +332,8 @@ app.post("/api/players-add", (req, res) => {
       });
     } catch (error) {
       console.error("❌ Database insert failed:", error.message, error.detail);
-      
-      if (error.code === "23505") { // Unique constraint violation
+
+      if (error.code === "23505") {
         return res.status(409).json({
           error: `A player with this email address already exists.`,
           details: error.detail,
@@ -356,27 +347,52 @@ app.post("/api/players-add", (req, res) => {
     }
   });
 });
-
-// GET Player for EDIT (FIXED: uses client/finally for better connection management)
+//---------------------------------------------
+//Edit the player details
+//---------------------------------------------
 app.get("/api/Player-edit", async (req, res) => {
+  // We will use a dedicated client from the pool to ensure proper transaction management (though optional for a SELECT)
   let client;
   try {
+    // 1. Extract parameters from the request query string
     const { id, player_id } = req.query;
 
+    // 2. Validate essential parameters (already correct)
     if (!id || !player_id) {
       return res
         .status(400)
         .json({ error: "Missing required parameters: id and player_id" });
     }
 
+    // --- Database Connection FIX ---
+    // Get a client from the connection pool
     client = await pool.connect();
+
     const queryText = `
             SELECT 
-                id, player_id, name, age, address, center_name, coach_name,
-                category, active, status, father_name, mother_name, gender,
-                date_of_birth, blood_group, email_id, emergency_contact_number,
-                guardian_contact_number, guardian_email_id, medical_condition,
-                aadhar_upload_path, birth_certificate_path, profile_photo_path, phone_no
+                id,
+                name,
+                age,
+                address,
+                center_name,
+                coach_name,
+                category,
+                active,
+                status,
+                father_name,
+                mother_name,
+                gender,
+                date_of_birth,
+                blood_group,
+                email_id,
+                emergency_contact_number,
+                guardian_contact_number,
+                guardian_email_id,
+                medical_condition,
+                aadhar_upload_path,
+                birth_certificate_path,
+                profile_photo_path,
+                phone_no 
             FROM 
                 cd.player_details 
             WHERE 
@@ -384,8 +400,10 @@ app.get("/api/Player-edit", async (req, res) => {
                 AND player_id = $2;
         `;
 
+    // 3. Execute the query using the connected client
     const result = await client.query(queryText, [id, player_id]);
 
+    // 4. Send the single fetched row as JSON response
     if (result.rows.length === 0) {
       return res
         .status(404)
@@ -394,73 +412,97 @@ app.get("/api/Player-edit", async (req, res) => {
 
     res.json(result.rows[0]);
   } catch (error) {
+    // 5. Handle any server/database errors
     console.error("Error fetching player details:", error);
     res.status(500).json({
       error: "Internal Server Error",
       details: error.message,
     });
   } finally {
+    // 6. Release the client back to the pool
     if (client) {
       client.release();
     }
   }
 });
 
-// UPDATE PLAYER
+// ---------------------------------------------
+// UPDATE PLAYER (FIXED)
+// ---------------------------------------------
 app.put("/api/Player-Edit/:id", async (req, res) => {
   try {
-    const playerIdFromUrl = req.params.id; // This should be 'id' column if the route is /:id
+    const playerIdFromUrl = req.params.id;
+    if (!playerIdFromUrl) {
+      return res.status(400).json({ error: "Missing player id in URL." });
+    }
+
+    // Destructure expected fields (will be undefined if not provided)
     const {
-      name, age, address, center_name, coach_name, category, active, status,
-      father_name, mother_name, gender, date_of_birth, blood_group, email_id,
-      emergency_contact_number, guardian_contact_number, guardian_email_id,
-      medical_condition, aadhar_upload_path, birth_certificate_path,
-      profile_photo_path, phone_no, // NOTE: player_id is not included, as we update by it
+      name,
+      age,
+      address,
+      center_name,
+      coach_name,
+      category,
+      active,
+      status,
+      father_name,
+      mother_name,
+      gender,
+      date_of_birth,
+      blood_group,
+      email_id,
+      emergency_contact_number,
+      guardian_contact_number,
+      guardian_email_id,
+      medical_condition,
+      aadhar_upload_path,
+      birth_certificate_path,
+      profile_photo_path,
+      phone_no,
     } = req.body;
 
-    if (!playerIdFromUrl) {
-      return res.status(400).json({ error: "Missing player ID in URL." });
-    }
-    
-    // Simple check to ensure *some* data is being updated
-    if (Object.keys(req.body).length === 0) {
-        return res.status(400).json({ error: "No fields provided to update." });
+    // Basic validation example: at least one field to update
+    if (
+      name === undefined &&
+      age === undefined &&
+      address === undefined &&
+      center_name === undefined &&
+      coach_name === undefined &&
+      category === undefined &&
+      active === undefined &&
+      status === undefined &&
+      father_name === undefined &&
+      mother_name === undefined &&
+      gender === undefined &&
+      date_of_birth === undefined &&
+      blood_group === undefined &&
+      email_id === undefined &&
+      emergency_contact_number === undefined &&
+      guardian_contact_number === undefined &&
+      guardian_email_id === undefined &&
+      medical_condition === undefined &&
+      aadhar_upload_path === undefined &&
+      birth_certificate_path === undefined &&
+      profile_photo_path === undefined &&
+      phone_no === undefined
+    ) {
+      return res.status(400).json({ error: "No fields provided to update." });
     }
 
+    // Convert types if DB expects specific types
+    // Example: if 'active' is stored as boolean in DB, ensure boolean
+    const activeBool =
+      typeof active === "boolean"
+        ? active
+        : active === "true" || active === 1 || active === "1";
 
-    const activeBool = 
-      (active === true || active === "true" || active === 1) ? true : false;
-    
-    // Correctly format Date if provided
-    const dob = date_of_birth 
-        ? new Date(date_of_birth).toISOString().split("T")[0] 
-        : null;
+    // If date_of_birth might include time, try to keep only date part for DB DATE column
+    const dob = date_of_birth
+      ? new Date(date_of_birth).toISOString().split("T")[0]
+      : null;
 
     const sql = `
-      UPDATE cd.player_details
-      SET
-        name = COALESCE($1, name), age = COALESCE($2, age), address = COALESCE($3, address),
-        center_name = COALESCE($4, center_name), coach_name = COALESCE($5, coach_name),
-        category = COALESCE($6, category), active = COALESCE($7, active), status = COALESCE($8, status),
-        father_name = COALESCE($9, father_name), mother_name = COALESCE($10, mother_name),
-        gender = COALESCE($11, gender), date_of_birth = COALESCE($12, date_of_birth),
-        blood_group = COALESCE($13, blood_group), email_id = COALESCE($14, email_id),
-        emergency_contact_number = COALESCE($15, emergency_contact_number),
-        guardian_contact_number = COALESCE($16, guardian_contact_number),
-        guardian_email_id = COALESCE($17, guardian_email_id),
-        medical_condition = COALESCE($18, medical_condition),
-        aadhar_upload_path = COALESCE($19, aadhar_upload_path),
-        birth_certificate_path = COALESCE($20, birth_certificate_path),
-        profile_photo_path = COALESCE($21, profile_photo_path),
-        phone_no = COALESCE($22, phone_no)
-      WHERE player_id = $23
-    `;
-
-    // Reverting to the old logic since COALESCE would require complex logic 
-    // to determine if a value was intentionally set to null or not provided.
-    // Assuming all fields are provided for a full update, as in the original code.
-
-    const updateSql = `
       UPDATE cd.player_details
       SET
         name = $1, age = $2, address = $3, center_name = $4, coach_name = $5,
@@ -472,20 +514,37 @@ app.put("/api/Player-Edit/:id", async (req, res) => {
         birth_certificate_path = $20, profile_photo_path = $21, phone_no = $22
       WHERE player_id = $23
     `;
-    // NOTE: This approach requires the client to send *all* fields, even if unchanged.
 
     const values = [
-      name ?? null, age ?? null, address ?? null, center_name ?? null, coach_name ?? null,
-      category ?? null, activeBool, status ?? null, father_name ?? null,
-      mother_name ?? null, gender ?? null, dob, blood_group ?? null,
-      email_id ?? null, emergency_contact_number ?? null,
-      guardian_contact_number ?? null, guardian_email_id ?? null,
-      medical_condition ?? null, aadhar_upload_path ?? null,
-      birth_certificate_path ?? null, profile_photo_path ?? null,
-      phone_no ?? null, playerIdFromUrl,
+      name ?? null,
+      age ?? null,
+      address ?? null,
+      center_name ?? null,
+      coach_name ?? null,
+      category ?? null,
+      activeBool,
+      status ?? null,
+      father_name ?? null,
+      mother_name ?? null,
+      gender ?? null,
+      dob,
+      blood_group ?? null,
+      email_id ?? null,
+      emergency_contact_number ?? null,
+      guardian_contact_number ?? null,
+      guardian_email_id ?? null,
+      medical_condition ?? null,
+      aadhar_upload_path ?? null,
+      birth_certificate_path ?? null,
+      profile_photo_path ?? null,
+      phone_no ?? null,
+      playerIdFromUrl,
     ];
 
-    const result = await pool.query(updateSql, values);
+    // Log input for debugging (remove/disable in production)
+    console.log("Updating player:", playerIdFromUrl, "payload:", req.body);
+
+    const result = await pool.query(sql, values);
 
     if (result.rowCount === 0) {
       return res
@@ -499,6 +558,7 @@ app.put("/api/Player-Edit/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("Error executing update query:", err);
+    // Return the error message to the client, but avoid leaking stack in production
     return res.status(500).json({
       error: "Failed to update player details",
       details: err.message || String(err),
@@ -506,11 +566,15 @@ app.put("/api/Player-Edit/:id", async (req, res) => {
   }
 });
 
-// DELETE Route (Deactivate Player)
+// ---------------------------------------------
+//DELETE route to remove a player by ID
+// ---------------------------------------------
+// DELETE Route (Deactivate Player) - Logic provided by user
 app.delete("/api/Player-Delete/:id", async (req, res) => {
   try {
-    const playerIdFromUrl = req.params.id; // This is the 'id' column, not player_id
+    const playerIdFromUrl = req.params.id;
 
+    // SQL to logically delete (deactivate) the player
     const sql = `
             UPDATE cd.player_details 
             SET active = FALSE, status = 'Inactive' 
@@ -526,6 +590,7 @@ app.delete("/api/Player-Delete/:id", async (req, res) => {
       });
     }
 
+    // Success response
     res.status(200).json({
       message: `Player ID ${result.rows[0].id} successfully deactivated`,
       playerId: result.rows[0].id,
@@ -539,27 +604,42 @@ app.delete("/api/Player-Delete/:id", async (req, res) => {
   }
 });
 
-// ---------------------------------------------
-// COACH ROUTES
-// ---------------------------------------------
-
-// POST Route for adding a new coach (INSERT)
+// 1. POST Route for adding a new coach (INSERT)
 app.post("/api/coaches-add", async (req, res) => {
   try {
     const {
-      coach_name, phone_numbers, email, address, players = 0, salary,
-      attendance, week_salary = 0, category = "Other", active = true, status = "Active",
+      coach_name,
+      phone_numbers,
+      email,
+      address,
+      players = 0,
+      salary,
+      attendance, // This field was NOT in the SQL VALUES list!
+      week_salary = 0,
+      category = "Other",
+      active = true,
+      status = "Active",
     } = req.body;
 
+    // 1. Validate mandatory fields
     const numericSalary = Number(salary);
-    if ( !coach_name || !email || !salary || isNaN(numericSalary) || numericSalary < 0 ) {
+    if (
+      !coach_name ||
+      !email ||
+      !salary ||
+      isNaN(numericSalary) ||
+      numericSalary < 0
+    ) {
       return res.status(400).json({
-        error: "Missing or invalid required fields (name, email, salary must be positive number).",
+        error:
+          "Missing or invalid required fields (name, email, salary must be positive number).",
       });
     }
 
+    // 2. Convert numerical/boolean fields
     const numericWeekSalary = Number(week_salary) || 0;
     const numericPlayers = Number(players) || 0;
+    // FIX APPLIED: Ensure 'active' is correctly parsed to a boolean for the DB.
     const isActive = active === true || active === "true" || active === 1;
 
     const sql = `
@@ -569,21 +649,29 @@ app.post("/api/coaches-add", async (req, res) => {
         RETURNING coach_id, coach_name; 
     `;
 
+    // FIX APPLIED: Re-ordered the values array to match the $1, $2, ... placeholders in the SQL query.
     const values = [
-      coach_name, phone_numbers, email, address, numericPlayers,
-      numericSalary, numericWeekSalary, category, isActive, status, attendance,
+      coach_name, // $1
+      phone_numbers, // $2
+      email, // $3
+      address, // $4
+      numericPlayers, // $5
+      numericSalary, // $6
+      numericWeekSalary, // $7
+      category, // $8
+      isActive, // $9 (ACTIVE)
+      status, // $10 (STATUS)
+      attendance, // $11 (ATTENDANCE)
     ];
 
     const result = await pool.query(sql, values);
 
+    // Ensure the response matches the client-side expectations (e.g., uses the 'coach' key)
     res.status(201).json({
       message: "Coach successfully added.",
-      coach: result.rows[0],
+      coach: result.rows[0], // Contains 'coach_id' and 'coach_name'
     });
   } catch (error) {
-    if (error.code === "23505") { // Unique constraint violation (likely on email)
-         return res.status(409).json({ error: "A coach with this email already exists." });
-    }
     console.error("❌ Database insertion error for coach:", error.message);
     res.status(500).json({
       error: "Failed to add coach details due to a server error.",
@@ -592,15 +680,26 @@ app.post("/api/coaches-add", async (req, res) => {
   }
 });
 
-// GET Coach List for Player Assignment Dropdown
+
+//assgin the coach and players 
+//coach list by the add players coact name list
 app.get("/api/coaches-list", async (req, res) => {
-  const sqlQuery = `SELECT coach_id, coach_name, category FROM cd.coaches_details WHERE active = TRUE ORDER BY coach_id ASC`;
+  console.log("Received request for coach list...");
+
+  // Your specific SQL query
+  const sqlQuery = `SELECT coach_id, coach_name,category FROM cd.coaches_details ORDER BY coach_id ASC`;
 
   try {
-    const result = await pool.query(sqlQuery);
+    const client = await pool.connect();
+
+    // Execute the query
+    const result = await client.query(sqlQuery);
+    client.release();
+    console.log(`Successfully retrieved ${result.rows.length} coaches.`);
     return res.json(result.rows);
   } catch (err) {
     console.error("Error executing query for coaches:", err.stack);
+    // Send a 500 Internal Server Error response
     return res.status(500).json({
       message: "Failed to fetch coach list from the database.",
       error: err.message,
@@ -608,12 +707,23 @@ app.get("/api/coaches-list", async (req, res) => {
   }
 });
 
-// GET All Coach Details (Admin View)
+// ---------------------------------------------
+//COACHES GET ROUTE
+// ---------------------------------------------
 app.get("/api/coach-details", async (req, res) => {
   try {
     const queryText = `
-        SELECT coach_id, players, coach_name, phone_numbers, salary, email,
-          address, attendance, week_salary, category, status, active
+        SELECT coach_id,
+          players,
+          coach_name,
+          phone_numbers,
+          salary,
+          email,
+          address,
+          attendance,
+          week_salary,
+          category,
+           status
      FROM cd.coaches_details ORDER BY coach_id DESC 
     `;
     const result = await pool.query(queryText);
@@ -626,49 +736,82 @@ app.get("/api/coach-details", async (req, res) => {
   }
 });
 
-// UPDATE Coach Details
-app.put("/api/coaches-update/:coach_id", async (req, res) => {
+// ---------------------------------------------
+//update the coach details
+// ---------------------------------------------
+app.put("/api/coaches-update/coach_id", async (req, res) => {
   try {
-    const coachIdFromUrl = req.params.coach_id;
     const {
-      coach_name, phone_numbers, email, address, salary,
-      week_salary, active, status,
+      coach_id,
+      coach_name,
+      phone_numbers,
+      email,
+      address,
+      salary,
+      week_salary,
+      active,
+      status,
     } = req.body;
 
-    const numericCoachId = Number(coachIdFromUrl);
+    // 1. Validate mandatory fields (using destructured names)
+    const numericCoachId = Number(coach_id);
     const numericSalary = Number(salary);
 
     if (
-      isNaN(numericCoachId) || numericCoachId <= 0 ||
-      !coach_name || !email || !salary || isNaN(numericSalary) || numericSalary < 0
+      !coach_id ||
+      isNaN(numericCoachId) ||
+      numericCoachId <= 0 ||
+      !coach_name ||
+      !email ||
+      !salary ||
+      isNaN(numericSalary) ||
+      numericSalary < 0
     ) {
       return res.status(400).json({
-        error: "Missing or invalid required fields (coach_id, name, email, salary must be valid).",
+        error:
+          "Missing or invalid required fields (coach_id, name, email, salary must be valid).",
       });
     }
 
+    // 2. Convert numerical/boolean fields
     const numericWeekSalary = Number(week_salary) || 0;
+    // Ensure 'active' is a proper boolean value for PostgreSQL
     const isActive = active === true || active === "true" || active === 1;
 
+    // 3. The FIXED SQL UPDATE query (Cleaned of all non-standard whitespace)
     const sql = `
         UPDATE cd.coaches_details
         SET 
-          coach_name = $1, phone_numbers = $2, email = $3, address = $4,
-          salary = $5, week_salary = $6, active = $7, status = $8
+          coach_name = $1,
+          phone_numbers = $2,
+          email = $3,
+          address = $4,
+          salary = $5,
+          week_salary = $6,
+          active = $7,
+          status = $8
         WHERE coach_id = $9
         RETURNING "coach_id", "coach_name", "status";
       `;
 
+    // 4. Values array (9 parameters)
     const values = [
-      coach_name, phone_numbers, email, address, numericSalary,
-      numericWeekSalary, isActive, status, numericCoachId, 
+      coach_name, // $1
+      phone_numbers, // $2
+      email, // $3
+      address, // $4
+      numericSalary, // $5
+      numericWeekSalary, // $6
+      isActive, // $7
+      status, // $8
+      numericCoachId, // $9 (WHERE clause)
     ];
 
     const result = await pool.query(sql, values);
 
     if (result.rowCount === 0) {
       return res.status(404).json({
-        error: `Coach with ID ${coachIdFromUrl} not found.`,
+        error: `Coach with ID ${coach_id} not found.`,
       });
     }
 
@@ -677,6 +820,7 @@ app.put("/api/coaches-update/:coach_id", async (req, res) => {
       coach: result.rows[0],
     });
   } catch (error) {
+    // This is the error handler that returned the 500 status.
     console.error("❌ Database update error for coach:", error.message);
     res.status(500).json({
       error: "Failed to update coach details due to a server error.",
@@ -685,7 +829,9 @@ app.put("/api/coaches-update/:coach_id", async (req, res) => {
   }
 });
 
-// DEACTIVATE Coach (Soft Delete)
+// ---------------------------------------------
+//DELETE the coach details
+// ---------------------------------------------
 app.put("/api/coaches-deactivate/:coach_id", async (req, res) => {
   try {
     const coachIdParam = req.params.coach_id;
@@ -706,7 +852,8 @@ app.put("/api/coaches-deactivate/:coach_id", async (req, res) => {
             RETURNING coach_id, coach_name, status; 
         `;
 
-    const result = await pool.query(sql, [numericCoachId]);
+    const values = [numericCoachId];
+    const result = await pool.query(sql, values);
 
     if (result.rowCount === 0) {
       return res.status(404).json({
@@ -727,36 +874,33 @@ app.put("/api/coaches-deactivate/:coach_id", async (req, res) => {
   }
 });
 
-// ---------------------------------------------
-// PLAYER ASSIGNMENT ROUTES
-// ---------------------------------------------
-
-// Fetch players for assignment view
+// 4. API Endpoint to fetch player data
 app.get("/api/players-agssign", async (req, res) => {
   try {
     const result = await pool.query(`
-        SELECT player_id, id, name, category, coach_name, coach_id  
-        FROM cd.player_details 
-        WHERE active = TRUE
-        ORDER BY player_id, id asc;
+        SELECT player_id, id, name,category,coach_name,coach_id  FROM cd.player_details ORDER BY player_id, id asc;
       `);
 
+    // Map the DB result to a cleaner JSON format expected by the frontend
     const players = result.rows.map((row) => ({
-      id: row.id,
-      player_id: row.player_id,
+      id: row.id, // Primary key
+      player_id: row.player_id, // Secondary ID/Legacy ID
       name: row.name,
       coachId: row.coach_id,
       category: row.category,
-      coach_name: row.coach_name,
+      coach_name: row.coach_name, // Must be present for assignment logic
+      // You might add other fields like position, status, etc.
     }));
 
+    // Return the data as a JSON response
     res.json({
       status: "success",
       count: players.length,
       players: players,
     });
   } catch (error) {
-    console.error("Error executing players-agssign query:", error.stack);
+    console.error("Error executing query:", error.stack);
+    // Send a 500 error response
     res.status(500).json({
       status: "error",
       message: "Failed to retrieve player data from the database.",
@@ -765,7 +909,7 @@ app.get("/api/players-agssign", async (req, res) => {
   }
 });
 
-// Update the assigned coach to player
+//Update the assigned coach to player
 app.post("/api/update-coach", async (req, res) => {
   const { coach_name, coach_id, player_id, id } = req.body;
 
@@ -790,9 +934,11 @@ app.post("/api/update-coach", async (req, res) => {
         WHERE player_id = $3 AND id = $4; 
     `;
 
+  // C. Define the parameters array for parameterized query
   const values = [coach_name, coach_id, player_id, id];
 
   try {
+    // D. Execute the query using the connection pool
     const result = await pool.query(sqlQuery, values);
 
     if (result.rowCount === 0) {
@@ -801,6 +947,7 @@ app.post("/api/update-coach", async (req, res) => {
         .json({ message: "No record found matching the criteria for update." });
     }
 
+    // E. Send a successful response
     res.status(200).json({
       message: "Coach assigned successfully.",
       updatedRows: result.rowCount,
@@ -816,19 +963,18 @@ app.post("/api/update-coach", async (req, res) => {
   }
 });
 
-// ---------------------------------------------
-// VENUE ROUTES
-// ---------------------------------------------
-
-// Helper function to format venue data (kept as is, it's good logic)
+//venue data formatting function
 const formatVenueData = (rows) => {
     const venuesMap = new Map();
 
     rows.forEach(row => {
-        const { id, name, centerHead, address, googleMapsUrl,
+        // Ensure these match the double-quoted aliases in the SQL query
+        const {
+            id, name, centerHead, address, googleMapsUrl,
             timeslotId, startTime, endTime, day
         } = row;
 
+        // 1. Create the main venue entry if it doesn't exist
         if (!venuesMap.has(id)) {
             venuesMap.set(id, {
                 id,
@@ -836,14 +982,16 @@ const formatVenueData = (rows) => {
                 centerHead,
                 address,
                 googleMapsUrl,
-                operatingHours: [],
+                operatingHours: [], // Array to hold all time slots
             });
         }
 
         const venue = venuesMap.get(id);
 
+        // 2. Only add time slots if the necessary data is present (non-NULL from LEFT JOIN)
         if (timeslotId && startTime && endTime && day) {
             
+            // Prevent duplicate slots if ORDER BY logic is complex
             const isSlotAlreadyAdded = venue.operatingHours.some(
                 slot => slot.day === day && slot.startTime === startTime && slot.endTime === endTime
             );
@@ -859,10 +1007,11 @@ const formatVenueData = (rows) => {
         }
     });
 
+    // Convert Map values back to an array for the response
     return Array.from(venuesMap.values());
 };
 
-// Fetch venue data
+//fetch venue data
 app.get("/api/venues-Details", async (req, res) => {
   const sqlQuery = `
 SELECT
@@ -898,8 +1047,10 @@ ORDER BY v.id, ts.id, d.day;
   }
 });
 
-// Add new venue and time slots (Transactional)
+///venus add the route here
 app.post("/api/venue-data/add", async (req, res) => {
+  // 🐛 FIX 1: Destructure googleUrl from req.body. 
+  // It is used in the query but was not destructured from the request body.
   const { name, centerHead, address, active = true, timeSlots, googleUrl } = req.body;
 
   if (
@@ -925,8 +1076,7 @@ app.post("/api/venue-data/add", async (req, res) => {
         VALUES ($1, $2, $3, $4, $5)
         RETURNING id;
     `;
-    // googleUrl || null handles an undefined or empty string googleUrl
-    const venueValues = [name, centerHead, address, active, googleUrl || null]; 
+    const venueValues = [name, centerHead, address, active, googleUrl || null];
     const venueResult = await client.query(venueQuery, venueValues);
     const venue_id = venueResult.rows[0].id;
 
@@ -939,12 +1089,11 @@ app.post("/api/venue-data/add", async (req, res) => {
           VALUES ($1, $2, $3, $4)
           RETURNING id;
       `;
-      const slotActive = slot.active || true;
       const timeSlotValues = [
         venue_id,
         slot.startTime,
         slot.endTime,
-        slotActive,
+        slot.active || true,
       ];
       const timeSlotResult = await client.query(timeSlotQuery, timeSlotValues);
       const time_slot_id = timeSlotResult.rows[0].id;
@@ -957,7 +1106,11 @@ app.post("/api/venue-data/add", async (req, res) => {
               VALUES ($1, $2, $3)
               RETURNING id;
           `;
-          const dayValues = [time_slot_id, day, slotActive];
+          // 🐛 FIX 3: Use the slot's 'active' status for the day, or default to true. 
+          // The original code used 'slot.active || true' for both timeSlotValues and dayValues.
+          // This is generally acceptable, but passing the same calculated 'active' status for consistency is better.
+          // Note: Assuming 'day' is a simple value (e.g., string/integer representing a day).
+          const dayValues = [time_slot_id, day, slot.active || true];
           await client.query(dayQuery, dayValues);
         }
       }
@@ -983,7 +1136,8 @@ app.post("/api/venue-data/add", async (req, res) => {
   }
 });
 
-// Deactivate venue and related data (Transactional)
+//delete venue route
+// server.js (or wherever your route lives)
 app.delete("/api/venues-delete/:id", async (req, res) => {
   const venueId = Number(req.params.id);
   if (!Number.isInteger(venueId) || venueId <= 0) {
@@ -995,28 +1149,28 @@ app.delete("/api/venues-delete/:id", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // FIX: Deactivate Time_slot_days related to the venue
+    // FIXED — changed venue_id → venueid (or your real FK)
     const deleteDaysQuery = `
       UPDATE cd.venuetimeslot_days
-      SET active = false, updated_at = CURRENT_TIMESTAMP
-      WHERE time_slot_id IN (SELECT id FROM cd.venuetime_slots WHERE venue_id = $1)
+      SET active = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
     `;
-    await client.query(deleteDaysQuery, [venueId]);
+    const resultDays = await client.query(deleteDaysQuery, [venueId]);
 
-    // FIX: Deactivate Time_slots related to the venue
     const deleteSlotsQuery = `
       UPDATE cd.venuetime_slots
-      SET active = false, updated_at = CURRENT_TIMESTAMP
-      WHERE venue_id = $1
+      SET active = false,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
     `;
-    await client.query(deleteSlotsQuery, [venueId]);
+    const resultSlots = await client.query(deleteSlotsQuery, [venueId]);
 
-    // Deactivate the main venue record
     const deleteVenueQuery = `
       UPDATE cd.venues_data
-      SET active = false, updated_at = CURRENT_TIMESTAMP
+      SET active = false,
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
-      RETURNING id;
     `;
     const resultVenue = await client.query(deleteVenueQuery, [venueId]);
 
@@ -1038,11 +1192,10 @@ app.delete("/api/venues-delete/:id", async (req, res) => {
   }
 });
 
-// ---------------------------------------------
-// COACH DASHBOARD (REQUIRES AUTH)
-// ---------------------------------------------
 
-// Helper function for cleaning SQL (Kept as is)
+
+//Start this serever coach details and Database dashboard working fine
+// The SQL Query Constant
 const sql = (strings, ...values) => {
     let query = strings.reduce((acc, str, i) => acc + str + (values[i] !== undefined ? values[i] : ''), '');
     query = query.trim();
@@ -1064,30 +1217,31 @@ app.get("/api/coach-data", authenticateToken, async (req, res) => {
   }
 
   try {
+    // Using the 'sql' template tag to safely format and clean the query string
     const queryString = sql`
-        SELECT 
-            p.player_id AS id,
-            p.name,
-            p.age,
-            p.category,
-            p.status,
-            ROUND(
-                (SUM(CASE WHEN a.is_present = TRUE THEN 1 ELSE 0 END) * 100.0)
-                / NULLIF(COUNT(DISTINCT a.attendance_date), 0),
-                2
-            ) AS attendance
-        FROM cd.player_details p
-        LEFT JOIN cd.attendance_sheet a ON p.player_id = a.player_id
-        INNER JOIN cd.coaches_details c ON p.coach_id = c.coach_id
-        INNER JOIN cd.users_login u ON c.email = u.email
-        WHERE
-            u.email = $1
-            AND u.role = 'coach'
-            AND p.active = TRUE
-        GROUP BY
-            p.player_id, p.name, p.age, p.category, p.status
-        ORDER BY
-            p.name;
+SELECT 
+    p.player_id AS id,
+    p.name,
+    p.age,
+    p.category,
+    p.status,
+    ROUND(
+        (SUM(CASE WHEN a.is_present = TRUE THEN 1 ELSE 0 END) * 100.0)
+        / NULLIF(COUNT(a.attendance_id), 0),
+        2
+    ) AS attendance
+FROM cd.player_details p
+LEFT JOIN cd.attendance_sheet a ON p.player_id = a.player_id
+INNER JOIN cd.coaches_details c ON p.coach_id = c.coach_id
+INNER JOIN cd.users_login u ON c.email = u.email
+WHERE
+    u.email = $1
+    AND u.role = 'coach'
+    AND p.active = TRUE
+GROUP BY
+    p.player_id, p.name, p.age, p.category, p.status
+ORDER BY
+    p.name;
     `;
 
     const result = await pool.query(
@@ -1095,6 +1249,7 @@ app.get("/api/coach-data", authenticateToken, async (req, res) => {
       [coachEmail]
     );
 
+    // Return the structured response
     res.json({
       coach_email: coachEmail,
       players: result.rows,
@@ -1106,26 +1261,22 @@ app.get("/api/coach-data", authenticateToken, async (req, res) => {
       .json({ error: "Internal server error while fetching player data." });
   }
 });
-
+// ---------------------------------------------
 // Attendance Recording Endpoint
+// ---------------------------------------------
 app.post("/api/attendance", async (req, res) => {
   const { playerId, attendanceDate, isPresent, coachId } = req.body;
-  
   if (!playerId || !attendanceDate || isPresent === undefined || !coachId) {
     return res.status(400).json({ error: "Missing required attendance data." });
   }
-  
   const queryText = `
     INSERT INTO cd.attendance_sheet 
     (player_id, attendance_date, is_present, recorded_by_coach_id)
     VALUES($1, $2, $3, $4)
-    ON CONFLICT (player_id, attendance_date) DO UPDATE
-    SET is_present = $3, recorded_by_coach_id = $4
     RETURNING *;
-  `; // Added ON CONFLICT to prevent duplicate attendance records for the same day
+  `;
 
   const queryValues = [playerId, attendanceDate, isPresent, coachId];
-  
   try {
     const result = await pool.query(queryText, queryValues);
     res.status(201).json({
@@ -1133,7 +1284,7 @@ app.post("/api/attendance", async (req, res) => {
       data: result.rows[0],
     });
   } catch (err) {
-    console.error("Error executing attendance query", err.stack);
+    console.error("Error executing query", err.stack);
     res.status(500).json({
       error: "Failed to record attendance due to server error.",
       details: err.message,
@@ -1141,10 +1292,8 @@ app.post("/api/attendance", async (req, res) => {
   }
 });
 
-
 // ---------------------------------------------
-// PARENT/GUARDIAN DASHBOARD (REQUIRES AUTH)
-// ---------------------------------------------
+//Fetches player details, attendance percentage, and recent activities for a player guardian
 app.get("/api/player-details/:email", authenticateToken, async (req, res) => {
   const parentEmail = req.params.email;
 
@@ -1155,6 +1304,10 @@ app.get("/api/player-details/:email", authenticateToken, async (req, res) => {
       .json({
         error: "Forbidden: Token role or email does not match requested data.",
       });
+  }
+
+  if (!parentEmail) {
+    return res.status(400).json({ error: "Missing parent email parameter." });
   }
 
   try {
@@ -1170,7 +1323,7 @@ app.get("/api/player-details/:email", authenticateToken, async (req, res) => {
                 pd.email_id AS player_email,
                 COALESCE(
                     CAST(SUM(CASE WHEN a.is_present = TRUE THEN 1 ELSE 0 END) AS NUMERIC) * 100 /
-                    NULLIF(COUNT(DISTINCT a.attendance_date), 0),
+                    NULLIF(COUNT(a.attendance_id), 0),
                     0
                 ) AS attendance_percentage,
                 (
@@ -1181,7 +1334,7 @@ app.get("/api/player-details/:email", authenticateToken, async (req, res) => {
                             'status', CASE WHEN a_recent.is_present THEN 'Present' ELSE 'Absent' END
                         )
                         ORDER BY a_recent.attendance_date DESC
-                        LIMIT 5 -- Limit recent activities for performance
+                       
                     )
                     FROM cd.attendance_sheet a_recent
                     WHERE a_recent.player_id = pd.player_id
@@ -1193,6 +1346,7 @@ app.get("/api/player-details/:email", authenticateToken, async (req, res) => {
             INNER JOIN
                 cd.users_login ul ON ul.email = pd.guardian_email_id
             WHERE
+                -- FIX: Use LOWER(TRIM()) for robust case-insensitive, whitespace-safe comparison
                 LOWER(TRIM(ul.email)) = LOWER(TRIM($1)) 
                 AND ul.role = 'parent'
             GROUP BY
@@ -1201,21 +1355,19 @@ app.get("/api/player-details/:email", authenticateToken, async (req, res) => {
 
     const result = await pool.query(sqlQuery, [parentEmail]);
 
+    // Returns empty array if no players found. Frontend handles this state.
     res.json(result.rows);
   } catch (err) {
-    console.error("Error executing guardian/parent query:", err.stack);
+    console.error("Error executing query:", err.stack);
     res
       .status(500)
       .json({ error: "Internal server error while fetching player data." });
   }
 });
 
+app.use(express.json());
 
-// ---------------------------------------------
-// REGISTRATION ROUTES
-// ---------------------------------------------
-
-// Fetch all registrations
+//fech data registrations API and code
 app.get('/api/registrations', async (req, res) => {
   const sqlQuery = `
     SELECT
@@ -1234,7 +1386,9 @@ app.get('/api/registrations', async (req, res) => {
   `;
 
   try {
-    const result = await pool.query(sqlQuery);
+    const client = await pool.connect();
+    const result = await client.query(sqlQuery);
+    client.release();
 
     res.status(200).json({
       success: true,
@@ -1248,7 +1402,7 @@ app.get('/api/registrations', async (req, res) => {
   }
 });
 
-// Endpoint for Bulk Uploading New Registrations from Excel
+//Endpoint for Bulk Uploading New Registrations from Excel
 app.post('/api/registrations/bulk-upload', async (req, res) => {
     const registrations = req.body;
 
@@ -1256,20 +1410,31 @@ app.post('/api/registrations/bulk-upload', async (req, res) => {
         return res.status(400).json({ error: 'Invalid or empty array' });
     }
 
+    // --- DEBUGGING LOG ---
+    console.log(`Received ${registrations.length} registrations for bulk upload.`);
+    // ---------------------
+
     const columns = [
-        "name", "phone_number", "email_id", "address", "age", "application_date", "parent_name"
+        "name",
+        "phone_number",
+        "email_id",
+        "address",
+        "age",
+        "application_date",
+        "parent_name"
     ];
 
     const values = [];
     const placeholders = registrations.map((reg, index) => {
         const base = index * columns.length + 1;
 
+        // Ensure explicit handling of nulls for database
         values.push(
             reg.name || null,
             reg.phone_number || null,
             reg.email_id || null, 
             reg.address || null,
-            (reg.age !== undefined && reg.age !== null) ? reg.age : null,
+            reg.age !== undefined && reg.age !== null ? reg.age : null, // Age can be 0, so check for undefined/null
             reg.application_date || null,
             reg.parent_name || null
         );
@@ -1285,17 +1450,27 @@ app.post('/api/registrations/bulk-upload', async (req, res) => {
         RETURNING *;
     `;
     
+    // --- DEBUGGING LOG ---
+    console.log("Generated SQL (Snippet):", sql.substring(0, 100) + '...');
+    // ---------------------
+
     try {
         const result = await pool.query(sql, values);
         
+        // --- DEBUGGING LOG ---
+        console.log(`Database query successful. Inserted: ${result.rowCount} rows.`);
+        // ---------------------
+
         return res.status(201).json({
             success: true,
             inserted: result.rowCount,
-            totalRecordsAttempted: registrations.length,
+            totalRecordsAttempted: registrations.length, // Added for better client feedback
             newRecords: result.rows
         });
     } catch (err) {
+        // --- CRITICAL ERROR LOG ---
         console.error("!!! DB ERROR (Bulk Insert Failed) !!!", err);
+        // --------------------------
         return res.status(500).json({
             error: "Database insert failed",
             details: err.message
@@ -1304,7 +1479,7 @@ app.post('/api/registrations/bulk-upload', async (req, res) => {
 });
 
 
-// Update registration status (Approved/Rejected)
+//updated the reaject and approved Registrations Excell
 app.put('/api/registrations/status/:id', async (req, res) => {  
     const { id } = req.params;
     const { status } = req.body; 
@@ -1312,13 +1487,6 @@ app.put('/api/registrations/status/:id', async (req, res) => {
     if (!status || !id) {
         return res.status(400).json({ error: "Missing required fields: status or registration ID." });
     }
-    
-    // Ensure status is a valid option if necessary
-    const validStatuses = ['Approved', 'Rejected', 'Pending']; 
-    if (!validStatuses.includes(status)) {
-        return res.status(400).json({ error: "Invalid status value provided." });
-    }
-
 
     const sqlQuery = `
       UPDATE cd.registrations_details 
@@ -1328,7 +1496,9 @@ app.put('/api/registrations/status/:id', async (req, res) => {
     const values = [status, id];
 
     try {
-        const result = await pool.query(sqlQuery, values);
+        const client = await pool.connect();
+        const result = await client.query(sqlQuery, values);
+        client.release();
 
         if (result.rowCount === 0) {
             return res.status(404).json({ success: false, message: `Registration with ID ${id} not found.` });
@@ -1345,10 +1515,9 @@ app.put('/api/registrations/status/:id', async (req, res) => {
     }
 });
 
-// Reject and Deactivate Registration (Soft Delete)
+//Delete the Registrations Serever.js and API 
 app.put('/api/registrations/reject', async (req, res) => {
   const { id } = req.body;
-  
   if (!id) {
     return res.status(400).json({ error: 'Registration ID (id) is required.' });
   }
@@ -1378,10 +1547,11 @@ app.put('/api/registrations/reject', async (req, res) => {
   }
 });
 
-
 // ---------------------------------------------
 // START SERVER
 // ---------------------------------------------
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}.`);
+    console.log(`DB Host is: ${process.env.POR}`);
 });
+
