@@ -23,10 +23,44 @@ import {
   Target,
 } from "lucide-react";
 import { fetchCoachAssignedPlayers, recordAttendance, fetchSessionData } from "../../../api";
+const processScheduleData = (sessions) => {
+  if (!Array.isArray(sessions)) return { todaysSchedule: [], weeklySchedule: [] };
+  
+  const today = new Date();
+  const todayDayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' }); 
+  
+  const todaysSchedule = sessions
+    .filter(s => s.day_of_week === todayDayOfWeek)
+    .map(s => ({ 
+      time: `${s.start_time.substring(0, 5)} - ${s.end_time.substring(0, 5)}`,
+      group: s.group_category,
+      location: s.location || "N/A",
+      status: s.status || "Scheduled",
+    }));
+
+  const daysOrder = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  
+  const groupedByDay = sessions.reduce((acc, session) => {
+    const day = session.day_of_week;
+    if (!acc[day]) {
+      acc[day] = [];
+    }
+    acc[day].push(`${session.start_time.substring(0, 5)} - ${session.end_time.substring(0, 5)} (${session.group_category})`);
+    return acc;
+  }, {});
+  const weeklySchedule = daysOrder
+    .filter(day => groupedByDay[day] && groupedByDay[day].length > 0)
+    .map(day => ({
+      day: day,
+      sessions: groupedByDay[day],
+    }));
+
+  return { todaysSchedule, weeklySchedule };
+};
+
 
 const CoachDashboard = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
-  // user object holds the coach's details (e.g., id, email)
   const { user, session, isLoading: isAuthLoading, logout } = useAuth(); 
   const [assignedPlayers, setAssignedPlayers] = useState([]);
   const [isLoadingPlayers, setIsLoadingPlayers] = useState(false);
@@ -53,7 +87,6 @@ const CoachDashboard = () => {
     setIsSubmitting(true);
     const dateString = selectedDate.toISOString().split("T")[0];    
     
-    // Ensure both ID and Token are available before submission
     const coachIdToSend = user?.id; 
     if (!coachIdToSend || !token) { 
         toast({
@@ -73,7 +106,7 @@ const CoachDashboard = () => {
           playerId: player.id,
           attendanceDate: dateString,
           isPresent: isPresent,
-          coachId: coachIdToSend, // Using numeric ID (user.id)
+          coachId: coachIdToSend, 
         };
         
         return recordAttendance(payload, token); 
@@ -113,7 +146,6 @@ const CoachDashboard = () => {
     navigate("/auth");
   };
 
-  // Memoized calculation for average attendance
   const averageAttendance = useMemo(() => {
     if (!assignedPlayers || assignedPlayers.length === 0) return 0;
     const total = assignedPlayers.reduce((sum, p) => {
@@ -126,13 +158,10 @@ const CoachDashboard = () => {
     return Math.round(total / assignedPlayers.length);
   }, [assignedPlayers]);
 
-  // useEffect to fetch Assigned Players
   useEffect(() => {
-    // 💡 FIX 1: Ensure both user.id (or user.email) AND token are present before fetching.
     if (isAuthLoading || !user || !token) { 
       setAssignedPlayers([]);
       setIsLoadingPlayers(false);
-      // Log for debugging the Forbidden error
       if (user && !token) console.warn("Cannot fetch players: Token is missing.");
       return;
     }
@@ -142,14 +171,12 @@ const CoachDashboard = () => {
     const fetchPlayers = async () => {
       setIsLoadingPlayers(true);
       try {
-        // fetchCoachAssignedPlayers relies only on the token in the API function
         const players = await fetchCoachAssignedPlayers(token); 
         if (!isMounted) return;
         setAssignedPlayers(players || []);
       } catch (error) {
         console.error("Dashboard failed to load players:", error);
         if (isMounted) setAssignedPlayers([]);
-        // Notify user about token issue
         if (error.message.includes('Invalid Token') || error.message.includes('Forbidden')) {
             toast({
                 title: "Authentication Error",
@@ -167,13 +194,9 @@ const CoachDashboard = () => {
     return () => {
       isMounted = false;
     };
-  // Reruns when user or token changes
   }, [isAuthLoading, user, token]); 
 
-  // useEffect to fetch Schedule Data
   useEffect(() => {
-    // 💡 FIX 2: Check for user.id and token before proceeding.
-    // The previous error showed .../undefined, meaning user.id was likely missing initially.
     if (!user?.id || !token) { 
         setSchedule({ today: [], weekly: [] });
         setIsLoadingSchedule(false);
@@ -185,13 +208,14 @@ const CoachDashboard = () => {
     const fetchSchedule = async () => {
         setIsLoadingSchedule(true);
         try {
-            // FIX 3: Ensure user.id (which holds the numeric coach ID) is passed to the API.
             const data = await fetchSessionData(user.id, token); 
             if (!isMounted) return;
 
+            const { todaysSchedule, weeklySchedule } = processScheduleData(data); 
+
             setSchedule({
-                today: data.todaysSchedule || [], 
-                weekly: data.weeklySchedule || []
+                today: todaysSchedule, 
+                weekly: weeklySchedule
             });
         } catch (error) {
             console.error("Dashboard failed to load schedule:", error);
@@ -219,7 +243,6 @@ const CoachDashboard = () => {
   }
 
   if (!user) {
-    // If user is null after loading, redirect to login
     return null;
   }
 
@@ -510,19 +533,15 @@ const CoachDashboard = () => {
                         className="flex items-center justify-between p-3 bg-muted rounded-lg"
                       >
                         <div className="flex items-center gap-3">
-                          {/* Avatar */}
                           <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-primary-foreground text-sm font-bold">
                             {player.name ? player.name.charAt(0) : "?"}
                           </div>
-                          {/* Player Name */}
                           <span className="font-medium">
                             {player.name || "Unnamed"}
                           </span>
                         </div>
 
-                        {/* --- Toggle Switch for Attendance --- */}
                         <div className="flex items-center space-x-3">
-                          {/* Display Current Status Text */}
                           <span
                             className={`font-medium min-w-[55px] text-right ${
                               isPresent ? "text-green-600" : "text-red-600"
@@ -531,7 +550,6 @@ const CoachDashboard = () => {
                             {isPresent ? "Present" : "Absent"}
                           </span>
 
-                          {/* Toggle Switch Control */}
                           <label
                             htmlFor={`attendance-switch-${player.id}`}
                             className="relative inline-flex items-center cursor-pointer"
@@ -548,11 +566,9 @@ const CoachDashboard = () => {
                                 handleAttendanceChange(player.id, newStatus);
                               }}
                             />
-                            {/* Visual representation of the toggle switch (Tailwind CSS styling) */}
                             <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
                           </label>
                         </div>
-                        {/* --- End: Toggle Switch --- */}
                       </div>
                     );
                   })}
